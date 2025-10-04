@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"bufio"
 	"context"
 	"crypto/tls"
 	"io"
@@ -9,21 +10,29 @@ import (
 	"strings"
 	"time"
 
+	"github.com/BetterCallFirewall/Hackerecon/internal/cert"
 	"github.com/BetterCallFirewall/Hackerecon/internal/config"
 	"github.com/BetterCallFirewall/Hackerecon/internal/storage"
 	"github.com/google/uuid"
 )
 
 type Server struct {
-	config  *config.Config
-	storage *storage.MemoryStorage
-	server  *http.Server
+	config      *config.Config
+	storage     *storage.MemoryStorage
+	server      *http.Server
+	certManager *cert.CertManager
 }
 
 func NewServer(cfg *config.Config, store *storage.MemoryStorage) *Server {
+	certMgr, err := cert.NewCertManager()
+	if err != nil {
+		panic(err)
+	}
+
 	return &Server{
-		config:  cfg,
-		storage: store,
+		config:      cfg,
+		storage:     store,
+		certManager: certMgr,
 	}
 }
 
@@ -157,8 +166,7 @@ func (s *Server) copyResponse(w http.ResponseWriter, resp *http.Response) {
 }
 
 func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
-	// CONNECT используется для HTTPS туннелирования
-	// Мы просто создаём TCP туннель между клиентом и целевым сервером
+	// MITM для HTTPS - расшифровка трафика
 
 	// Получаем доступ к underlying connection
 	hijacker, ok := w.(http.Hijacker)
@@ -174,41 +182,86 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 	}
 	defer clientConn.Close()
 
-	// Подключаемся к целевому серверу
-	destConn, err := net.DialTimeout("tcp", r.Host, 10*time.Second)
-	if err != nil {
-		clientConn.Write([]byte("HTTP/1.1 503 Service Unavailable\r\n\r\n"))
-		return
-	}
-	defer destConn.Close()
-
 	// Сообщаем клиенту что туннель установлен
 	clientConn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
 
-	// Логируем HTTPS туннель (без содержимого, т.к. он зашифрован)
-	requestData := &storage.RequestData{
-		ID:        uuid.New().String(),
-		URL:       "https://" + r.Host,
-		Method:    "CONNECT",
-		Headers:   r.Header,
-		Body:      "[HTTPS tunnel - encrypted]",
-		Timestamp: time.Now(),
-		Response: &storage.ResponseData{
-			Status:  200,
-			Headers: http.Header{},
-			Body:    "[HTTPS tunnel - encrypted]",
-		},
+	// Извлекаем хост без порта
+	host, _, _ := net.SplitHostPort(r.Host)
+	if host == "" {
+		host = r.Host
 	}
+
+	// Получаем сертификат для этого хоста
+	certificate, err := s.certManager.GetCertificate(host)
+	if err != nil {
+		return
+	}
+
+	// Оборачиваем соединение в TLS
+	tlsConfig := &tls.Config{
+		Certificates: []tls.Certificate{*certificate},
+	}
+
+	tlsClientConn := tls.Server(clientConn, tlsConfig)
+	defer tlsClientConn.Close()
+
+	// Делаем TLS handshake
+	if err := tlsClientConn.Handshake(); err != nil {
+		return
+	}
+
+	// Обрабатываем запросы в цикле (может быть несколько запросов по одному соединению)
+	reader := bufio.NewReader(tlsClientConn)
+
+	for {
+		// Читаем HTTP запрос от клиента через TLS
+		req, err := http.ReadRequest(reader)
+		if err != nil {
+			return
+		}
+
+		// Формируем полный URL
+		req.URL.Scheme = "https"
+		req.URL.Host = r.Host
+
+		// Обрабатываем запрос
+		s.handleHTTPSRequest(tlsClientConn, req)
+
+		// Если Connection: close - выходим
+		if req.Header.Get("Connection") == "close" {
+			return
+		}
+	}
+}
+
+func (s *Server) handleHTTPSRequest(clientConn net.Conn, req *http.Request) {
+	// Захватываем запрос
+	requestData := s.captureRequest(req, req.URL.String())
+
+	// Отправляем запрос к реальному серверу
+	response, err := s.forwardRequest(req, req.URL.String())
+	if err != nil {
+		// Отправляем ошибку клиенту
+		clientConn.Write([]byte("HTTP/1.1 502 Bad Gateway\r\n\r\n"))
+		return
+	}
+	defer response.Body.Close()
+
+	// Захватываем ответ
+	responseData := s.captureResponse(response)
+
+	// Сохраняем
+	requestData.Response = responseData
 	s.storage.StoreRequest(requestData)
 
-	// Копируем данные в обе стороны
-	go io.Copy(destConn, clientConn)
-	io.Copy(clientConn, destConn)
+	// Отправляем ответ клиенту
+	response.Write(clientConn)
 }
 
 func (s *Server) getCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
-	// Простая генерация самоподписанного сертификата
-	// В продакшене нужно использовать более сложную логику
-	// Пока возвращаем nil для HTTP-only режима
 	return nil, nil
+}
+
+func (s *Server) GetCAPath() string {
+	return s.certManager.GetCAPath()
 }

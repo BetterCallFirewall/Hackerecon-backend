@@ -57,7 +57,6 @@ func (s *Server) Start() error {
 		},
 	}
 
-	// Для простоты MVP - используем HTTP
 	return s.server.ListenAndServe()
 }
 
@@ -71,16 +70,13 @@ func (s *Server) Stop() error {
 }
 
 func (s *Server) handleRequest(w http.ResponseWriter, r *http.Request) {
-	// Обрабатываем CONNECT для HTTPS
 	if r.Method == http.MethodConnect {
 		s.handleConnect(w, r)
 		return
 	}
 
-	// Получаем полный URL из запроса
 	targetURL := r.URL.String()
 
-	// Если URL не абсолютный, формируем его из Host
 	if !r.URL.IsAbs() {
 		scheme := "http"
 		if r.TLS != nil {
@@ -89,10 +85,8 @@ func (s *Server) handleRequest(w http.ResponseWriter, r *http.Request) {
 		targetURL = scheme + "://" + r.Host + r.RequestURI
 	}
 
-	// Перехватываем запрос
 	requestData := s.captureRequest(r, targetURL)
 
-	// Пересылаем запрос к целевому серверу
 	response, err := s.forwardRequest(r, targetURL)
 	if err != nil {
 		http.Error(w, "Proxy error: "+err.Error(), http.StatusBadGateway)
@@ -100,19 +94,15 @@ func (s *Server) handleRequest(w http.ResponseWriter, r *http.Request) {
 	}
 	defer response.Body.Close()
 
-	// Захватываем ответ
 	responseData := s.captureResponse(response)
 
-	// Сохраняем запрос с ответом
 	requestData.Response = responseData
 	s.storage.StoreRequest(requestData)
 
-	// Отправляем в WebSocket
 	if s.broadcaster != nil {
 		s.broadcaster.Broadcast(requestData)
 	}
 
-	// Возвращаем ответ клиенту
 	s.copyResponse(w, response)
 }
 
@@ -142,21 +132,18 @@ func (s *Server) captureResponse(resp *http.Response) *proxymodels.ResponseData 
 }
 
 func (s *Server) forwardRequest(r *http.Request, targetURL string) (*http.Response, error) {
-	// Создаем HTTP клиент
 	client := &http.Client{
 		Timeout: 30 * time.Second,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse // Не следуем за редиректами автоматически
+			return http.ErrUseLastResponse 
 		},
 	}
 
-	// Создаем новый запрос
 	req, err := http.NewRequest(r.Method, targetURL, r.Body)
 	if err != nil {
 		return nil, err
 	}
 
-	// Копируем заголовки, кроме Proxy-Connection
 	for name, values := range r.Header {
 		if name == "Proxy-Connection" {
 			continue
@@ -170,7 +157,6 @@ func (s *Server) forwardRequest(r *http.Request, targetURL string) (*http.Respon
 }
 
 func (s *Server) copyResponse(w http.ResponseWriter, resp *http.Response) {
-	// Копируем заголовки ответа
 	for name, values := range resp.Header {
 		for _, value := range values {
 			w.Header().Add(name, value)
@@ -182,9 +168,6 @@ func (s *Server) copyResponse(w http.ResponseWriter, resp *http.Response) {
 }
 
 func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
-	// MITM для HTTPS - расшифровка трафика
-
-	// Получаем доступ к underlying connection
 	hijacker, ok := w.(http.Hijacker)
 	if !ok {
 		http.Error(w, "Hijacking not supported", http.StatusInternalServerError)
@@ -198,22 +181,18 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 	}
 	defer clientConn.Close()
 
-	// Сообщаем клиенту что туннель установлен
 	clientConn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
 
-	// Извлекаем хост без порта
 	host, _, _ := net.SplitHostPort(r.Host)
 	if host == "" {
 		host = r.Host
 	}
 
-	// Получаем сертификат для этого хоста
 	certificate, err := s.certManager.GetCertificate(host)
 	if err != nil {
 		return
 	}
 
-	// Оборачиваем соединение в TLS
 	tlsConfig := &tls.Config{
 		Certificates: []tls.Certificate{*certificate},
 	}
@@ -221,29 +200,23 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 	tlsClientConn := tls.Server(clientConn, tlsConfig)
 	defer tlsClientConn.Close()
 
-	// Делаем TLS handshake
 	if err := tlsClientConn.Handshake(); err != nil {
 		return
 	}
 
-	// Обрабатываем запросы в цикле (может быть несколько запросов по одному соединению)
 	reader := bufio.NewReader(tlsClientConn)
 
 	for {
-		// Читаем HTTP запрос от клиента через TLS
 		req, err := http.ReadRequest(reader)
 		if err != nil {
 			return
 		}
 
-		// Формируем полный URL
 		req.URL.Scheme = "https"
 		req.URL.Host = r.Host
 
-		// Обрабатываем запрос
 		s.handleHTTPSRequest(tlsClientConn, req)
 
-		// Если Connection: close - выходим
 		if req.Header.Get("Connection") == "close" {
 			return
 		}
@@ -251,31 +224,24 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleHTTPSRequest(clientConn net.Conn, req *http.Request) {
-	// Захватываем запрос
 	requestData := s.captureRequest(req, req.URL.String())
 
-	// Отправляем запрос к реальному серверу
 	response, err := s.forwardRequest(req, req.URL.String())
 	if err != nil {
-		// Отправляем ошибку клиенту
 		clientConn.Write([]byte("HTTP/1.1 502 Bad Gateway\r\n\r\n"))
 		return
 	}
 	defer response.Body.Close()
 
-	// Захватываем ответ
 	responseData := s.captureResponse(response)
 
-	// Сохраняем
 	requestData.Response = responseData
 	s.storage.StoreRequest(requestData)
 
-	// Отправляем в WebSocket
 	if s.broadcaster != nil {
 		s.broadcaster.Broadcast(requestData)
 	}
 
-	// Отправляем ответ клиенту
 	response.Write(clientConn)
 }
 

@@ -38,14 +38,11 @@ func NewServer(cfg *config.Config, store storageI) *Server {
 func (s *Server) Start() error {
 	mux := http.NewServeMux()
 
-	// API endpoints
 	mux.HandleFunc("/api/requests", s.handleGetRequests)
 	mux.HandleFunc("/api/requests/", s.handleGetRequest)
 
-	// WebSocket endpoint
 	mux.HandleFunc("/ws", s.hub.ServeWS)
 
-	// Health check
 	mux.HandleFunc(
 		"/health", func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)

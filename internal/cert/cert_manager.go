@@ -31,9 +31,7 @@ func NewCertManager(cfg *config.Config) (*Manager, error) {
 		caFile: cfg.Cert.CertFile,
 	}
 
-	// Пытаемся загрузить существующий CA
 	if err := cm.loadCA(); err != nil {
-		// Если не получилось - генерируем новый
 		if err := cm.generateCA(); err != nil {
 			return nil, err
 		}
@@ -43,13 +41,11 @@ func NewCertManager(cfg *config.Config) (*Manager, error) {
 }
 
 func (cm *Manager) generateCA() error {
-	// Генерируем приватный ключ
 	caKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		return err
 	}
 
-	// Создаем CA сертификат
 	ca := &x509.Certificate{
 		SerialNumber: big.NewInt(time.Now().Unix()),
 		Subject: pkix.Name{
@@ -57,20 +53,18 @@ func (cm *Manager) generateCA() error {
 			CommonName:   "Hackerecon Root CA",
 		},
 		NotBefore:             time.Now(),
-		NotAfter:              time.Now().AddDate(10, 0, 0), // 10 лет
+		NotAfter:              time.Now().AddDate(10, 0, 0),
 		IsCA:                  true,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth, x509.ExtKeyUsageServerAuth},
 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
 		BasicConstraintsValid: true,
 	}
 
-	// Подписываем сертификат самим собой
 	caBytes, err := x509.CreateCertificate(rand.Reader, ca, ca, &caKey.PublicKey, caKey)
 	if err != nil {
 		return err
 	}
 
-	// Сохраняем в файл
 	os.MkdirAll(filepath.Dir(cm.caFile), 0755)
 
 	certOut, err := os.Create(cm.caFile)
@@ -101,7 +95,6 @@ func (cm *Manager) generateCA() error {
 }
 
 func (cm *Manager) loadCA() error {
-	// Загружаем сертификат
 	certPEM, err := os.ReadFile(cm.caFile)
 	if err != nil {
 		return err
@@ -117,7 +110,6 @@ func (cm *Manager) loadCA() error {
 		return err
 	}
 
-	// Загружаем ключ
 	keyPEM, err := os.ReadFile(filepath.Join(filepath.Dir(cm.caFile), "ca-key.pem"))
 	if err != nil {
 		return err
@@ -140,7 +132,6 @@ func (cm *Manager) loadCA() error {
 }
 
 func (cm *Manager) GetCertificate(host string) (*tls.Certificate, error) {
-	// Проверяем кеш
 	cm.mu.RLock()
 	if cert, ok := cm.certs[host]; ok {
 		cm.mu.RUnlock()
@@ -148,22 +139,18 @@ func (cm *Manager) GetCertificate(host string) (*tls.Certificate, error) {
 	}
 	cm.mu.RUnlock()
 
-	// Генерируем новый сертификат
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
-	// Двойная проверка
 	if cert, ok := cm.certs[host]; ok {
 		return cert, nil
 	}
 
-	// Генерируем приватный ключ
 	certKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		return nil, err
 	}
 
-	// Создаем сертификат
 	serialNumber, _ := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
 
 	template := &x509.Certificate{
@@ -178,20 +165,17 @@ func (cm *Manager) GetCertificate(host string) (*tls.Certificate, error) {
 		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 	}
 
-	// Добавляем хост как DNS name
 	if ip := net.ParseIP(host); ip != nil {
 		template.IPAddresses = []net.IP{ip}
 	} else {
 		template.DNSNames = []string{host}
 	}
 
-	// Подписываем CA ключом
 	certBytes, err := x509.CreateCertificate(rand.Reader, template, cm.ca, &certKey.PublicKey, cm.caKey)
 	if err != nil {
 		return nil, err
 	}
 
-	// Создаем tls.Certificate
 	cert := &tls.Certificate{
 		Certificate: [][]byte{certBytes, cm.ca.Raw},
 		PrivateKey:  certKey,

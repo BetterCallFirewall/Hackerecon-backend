@@ -39,10 +39,8 @@ func NewLLMAnalyzer(cfg *config.Config) *LLMAnalyzer {
 func (a *LLMAnalyzer) Analyze(req *proxymodels.RequestData, resp *proxymodels.ResponseData) (
 	*llmmodels.AnalysisResult, error,
 ) {
-	// Формируем промпт для анализа
 	prompt := a.buildPrompt(req, resp)
 
-	// Отправляем запрос к LLM
 	llmReq := LLMRequest{
 		Model:  a.config.LLM.Model,
 		Prompt: prompt,
@@ -71,7 +69,6 @@ func (a *LLMAnalyzer) Analyze(req *proxymodels.RequestData, resp *proxymodels.Re
 		return nil, err
 	}
 
-	// Парсим результат анализа
 	return a.parseAnalysisResult(llmResp.Response)
 }
 
@@ -122,10 +119,8 @@ Response Body: %s
 }
 
 func (a *LLMAnalyzer) parseAnalysisResult(response string) (*llmmodels.AnalysisResult, error) {
-	// Простой парсинг JSON ответа от LLM
 	var result llmmodels.AnalysisResult
 	if err := json.Unmarshal([]byte(response), &result); err != nil {
-		// Если не удалось распарсить JSON, создаем базовый результат
 		return &llmmodels.AnalysisResult{
 			VulnerabilitiesFound: false,
 			Findings:             []llmmodels.VulnerabilityFinding{},

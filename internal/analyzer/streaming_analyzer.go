@@ -120,12 +120,11 @@ func (sa *StreamingAnalyzer) streamAnalysis(
 
 		var streamResp OllamaStreamResponse
 		if err := json.Unmarshal([]byte(line), &streamResp); err != nil {
-			continue // Пропускаем невалидные строки
+			continue
 		}
 
 		fullResponse.WriteString(streamResp.Response)
 
-		// Отправляем частичный результат
 		resultChan <- &PartialResult{
 			RequestID: requestID,
 			Chunk:     streamResp.Response,
@@ -133,7 +132,6 @@ func (sa *StreamingAnalyzer) streamAnalysis(
 		}
 
 		if streamResp.Done {
-			// Парсим финальный результат
 			analysis, err := sa.parseAnalysis(fullResponse.String())
 			if err != nil {
 				resultChan <- &PartialResult{
@@ -157,7 +155,6 @@ func (sa *StreamingAnalyzer) streamAnalysis(
 }
 
 func (sa *StreamingAnalyzer) parseAnalysis(response string) (*llmmodel.AnalysisResult, error) {
-	// Ищем JSON в ответе LLM
 	start := strings.Index(response, "{")
 	end := strings.LastIndex(response, "}")
 

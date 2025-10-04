@@ -9,7 +9,6 @@ import (
 type Config struct {
 	Proxy ProxyConfig `yaml:"proxy"`
 	Web   WebConfig   `yaml:"web"`
-	LLM   LLMConfig   `yaml:"llm"`
 }
 
 type ProxyConfig struct {
@@ -18,11 +17,6 @@ type ProxyConfig struct {
 
 type WebConfig struct {
 	ListenAddr string `yaml:"listen_addr"`
-}
-
-type LLMConfig struct {
-	URL   string `yaml:"url"`
-	Model string `yaml:"model"`
 }
 
 func Load(path string) (*Config, error) {
@@ -42,12 +36,6 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.Web.ListenAddr == "" {
 		cfg.Web.ListenAddr = ":8081"
-	}
-	if cfg.LLM.URL == "" {
-		cfg.LLM.URL = "http://localhost:11434/api/generate"
-	}
-	if cfg.LLM.Model == "" {
-		cfg.LLM.Model = "llama2"
 	}
 
 	return &cfg, nil

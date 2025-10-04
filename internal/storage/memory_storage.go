@@ -7,34 +7,19 @@ import (
 )
 
 type RequestData struct {
-	ID        string
-	URL       string
-	Method    string
-	Headers   http.Header
-	Body      string
-	Timestamp time.Time
-	Analysis  *AnalysisResult
+	ID        string      `json:"id"`
+	URL       string      `json:"url"`
+	Method    string      `json:"method"`
+	Headers   http.Header `json:"headers"`
+	Body      string      `json:"body"`
+	Timestamp time.Time   `json:"timestamp"`
+	Response  *ResponseData `json:"response,omitempty"`
 }
 
 type ResponseData struct {
-	Status  int
-	Headers http.Header
-	Body    string
-}
-
-type AnalysisResult struct {
-	VulnerabilitiesFound bool                    `json:"vulnerabilities_found"`
-	Findings            []VulnerabilityFinding   `json:"findings"`
-	OverallRisk         string                  `json:"overall_risk"`
-	PentesterActions    []string                `json:"pentester_actions"`
-}
-
-type VulnerabilityFinding struct {
-	Type           string `json:"type"`
-	Severity       string `json:"severity"`
-	Location       string `json:"location"`
-	Description    string `json:"description"`
-	Recommendation string `json:"recommendation"`
+	Status  int         `json:"status"`
+	Headers http.Header `json:"headers"`
+	Body    string      `json:"body"`
 }
 
 type MemoryStorage struct {

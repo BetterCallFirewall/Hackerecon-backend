@@ -4,39 +4,33 @@ import (
 	"context"
 	"crypto/tls"
 	"io"
-	"log"
+	"net"
 	"net/http"
 	"strings"
 	"time"
 
-	"github.com/BetterCallFirewall/Hackerecon/internal/analyzer"
 	"github.com/BetterCallFirewall/Hackerecon/internal/config"
 	"github.com/BetterCallFirewall/Hackerecon/internal/storage"
 	"github.com/google/uuid"
 )
 
 type Server struct {
-	config   *config.Config
-	analyzer *analyzer.LLMAnalyzer
-	storage  *storage.MemoryStorage
-	server   *http.Server
+	config  *config.Config
+	storage *storage.MemoryStorage
+	server  *http.Server
 }
 
 func NewServer(cfg *config.Config, store *storage.MemoryStorage) *Server {
 	return &Server{
-		config:   cfg,
-		analyzer: analyzer.NewLLMAnalyzer(cfg),
-		storage:  store,
+		config:  cfg,
+		storage: store,
 	}
 }
 
 func (s *Server) Start() error {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", s.handleRequest)
-
 	s.server = &http.Server{
 		Addr:    s.config.Proxy.ListenAddr,
-		Handler: mux,
+		Handler: http.HandlerFunc(s.handleRequest),
 		TLSConfig: &tls.Config{
 			GetCertificate: s.getCertificate,
 		},
@@ -56,13 +50,31 @@ func (s *Server) Stop() error {
 }
 
 func (s *Server) handleRequest(w http.ResponseWriter, r *http.Request) {
+	// Обрабатываем CONNECT для HTTPS
+	if r.Method == http.MethodConnect {
+		s.handleConnect(w, r)
+		return
+	}
+
+	// Получаем полный URL из запроса
+	targetURL := r.URL.String()
+
+	// Если URL не абсолютный, формируем его из Host
+	if !r.URL.IsAbs() {
+		scheme := "http"
+		if r.TLS != nil {
+			scheme = "https"
+		}
+		targetURL = scheme + "://" + r.Host + r.RequestURI
+	}
+
 	// Перехватываем запрос
-	requestData := s.captureRequest(r)
+	requestData := s.captureRequest(r, targetURL)
 
 	// Пересылаем запрос к целевому серверу
-	response, err := s.forwardRequest(r)
+	response, err := s.forwardRequest(r, targetURL)
 	if err != nil {
-		http.Error(w, "Proxy error", http.StatusBadGateway)
+		http.Error(w, "Proxy error: "+err.Error(), http.StatusBadGateway)
 		return
 	}
 	defer response.Body.Close()
@@ -70,20 +82,21 @@ func (s *Server) handleRequest(w http.ResponseWriter, r *http.Request) {
 	// Захватываем ответ
 	responseData := s.captureResponse(response)
 
-	// Отправляем на анализ в LLM (асинхронно)
-	go s.analyzeTraffic(requestData, responseData)
+	// Сохраняем запрос с ответом
+	requestData.Response = responseData
+	s.storage.StoreRequest(requestData)
 
 	// Возвращаем ответ клиенту
 	s.copyResponse(w, response)
 }
 
-func (s *Server) captureRequest(r *http.Request) *storage.RequestData {
+func (s *Server) captureRequest(r *http.Request, targetURL string) *storage.RequestData {
 	body, _ := io.ReadAll(r.Body)
 	r.Body = io.NopCloser(strings.NewReader(string(body)))
 
 	return &storage.RequestData{
 		ID:        uuid.New().String(),
-		URL:       r.URL.String(),
+		URL:       targetURL,
 		Method:    r.Method,
 		Headers:   r.Header,
 		Body:      string(body),
@@ -102,17 +115,26 @@ func (s *Server) captureResponse(resp *http.Response) *storage.ResponseData {
 	}
 }
 
-func (s *Server) forwardRequest(r *http.Request) (*http.Response, error) {
-	// Простая реализация пересылки запроса
-	client := &http.Client{Timeout: 30 * time.Second}
+func (s *Server) forwardRequest(r *http.Request, targetURL string) (*http.Response, error) {
+	// Создаем HTTP клиент
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse // Не следуем за редиректами автоматически
+		},
+	}
 
-	req, err := http.NewRequest(r.Method, r.URL.String(), r.Body)
+	// Создаем новый запрос
+	req, err := http.NewRequest(r.Method, targetURL, r.Body)
 	if err != nil {
 		return nil, err
 	}
 
-	// Копируем заголовки
+	// Копируем заголовки, кроме Proxy-Connection
 	for name, values := range r.Header {
+		if name == "Proxy-Connection" {
+			continue
+		}
 		for _, value := range values {
 			req.Header.Add(name, value)
 		}
@@ -121,18 +143,6 @@ func (s *Server) forwardRequest(r *http.Request) (*http.Response, error) {
 	return client.Do(req)
 }
 
-func (s *Server) analyzeTraffic(req *storage.RequestData, resp *storage.ResponseData) {
-	// Анализируем трафик с помощью LLM
-	analysis, err := s.analyzer.Analyze(req, resp)
-	if err != nil {
-		log.Printf("Analysis failed: %v", err)
-		return
-	}
-
-	// Сохраняем результаты
-	req.Analysis = analysis
-	s.storage.StoreRequest(req)
-}
 
 func (s *Server) copyResponse(w http.ResponseWriter, resp *http.Response) {
 	// Копируем заголовки ответа
@@ -144,6 +154,56 @@ func (s *Server) copyResponse(w http.ResponseWriter, resp *http.Response) {
 
 	w.WriteHeader(resp.StatusCode)
 	io.Copy(w, resp.Body)
+}
+
+func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
+	// CONNECT используется для HTTPS туннелирования
+	// Мы просто создаём TCP туннель между клиентом и целевым сервером
+
+	// Получаем доступ к underlying connection
+	hijacker, ok := w.(http.Hijacker)
+	if !ok {
+		http.Error(w, "Hijacking not supported", http.StatusInternalServerError)
+		return
+	}
+
+	clientConn, _, err := hijacker.Hijack()
+	if err != nil {
+		http.Error(w, "Cannot hijack connection", http.StatusInternalServerError)
+		return
+	}
+	defer clientConn.Close()
+
+	// Подключаемся к целевому серверу
+	destConn, err := net.DialTimeout("tcp", r.Host, 10*time.Second)
+	if err != nil {
+		clientConn.Write([]byte("HTTP/1.1 503 Service Unavailable\r\n\r\n"))
+		return
+	}
+	defer destConn.Close()
+
+	// Сообщаем клиенту что туннель установлен
+	clientConn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
+
+	// Логируем HTTPS туннель (без содержимого, т.к. он зашифрован)
+	requestData := &storage.RequestData{
+		ID:        uuid.New().String(),
+		URL:       "https://" + r.Host,
+		Method:    "CONNECT",
+		Headers:   r.Header,
+		Body:      "[HTTPS tunnel - encrypted]",
+		Timestamp: time.Now(),
+		Response: &storage.ResponseData{
+			Status:  200,
+			Headers: http.Header{},
+			Body:    "[HTTPS tunnel - encrypted]",
+		},
+	}
+	s.storage.StoreRequest(requestData)
+
+	// Копируем данные в обе стороны
+	go io.Copy(destConn, clientConn)
+	io.Copy(clientConn, destConn)
 }
 
 func (s *Server) getCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {

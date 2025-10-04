@@ -8,7 +8,8 @@ import (
 	"time"
 
 	"github.com/BetterCallFirewall/Hackerecon/internal/config"
-	"github.com/BetterCallFirewall/Hackerecon/internal/storage"
+	llmmodels "github.com/BetterCallFirewall/Hackerecon/internal/models/llm"
+	proxymodels "github.com/BetterCallFirewall/Hackerecon/internal/models/proxy"
 )
 
 type LLMAnalyzer struct {
@@ -30,12 +31,14 @@ func NewLLMAnalyzer(cfg *config.Config) *LLMAnalyzer {
 	return &LLMAnalyzer{
 		config: cfg,
 		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
+			Timeout: 1 * time.Minute,
 		},
 	}
 }
 
-func (a *LLMAnalyzer) Analyze(req *storage.RequestData, resp *storage.ResponseData) (*storage.AnalysisResult, error) {
+func (a *LLMAnalyzer) Analyze(req *proxymodels.RequestData, resp *proxymodels.ResponseData) (
+	*llmmodels.AnalysisResult, error,
+) {
 	// Формируем промпт для анализа
 	prompt := a.buildPrompt(req, resp)
 
@@ -72,7 +75,7 @@ func (a *LLMAnalyzer) Analyze(req *storage.RequestData, resp *storage.ResponseDa
 	return a.parseAnalysisResult(llmResp.Response)
 }
 
-func (a *LLMAnalyzer) buildPrompt(req *storage.RequestData, resp *storage.ResponseData) string {
+func (a *LLMAnalyzer) buildPrompt(req *proxymodels.RequestData, resp *proxymodels.ResponseData) string {
 	systemPrompt := `Ты - эксперт по веб-безопасности. Анализируй HTTP трафик и выявляй потенциальные уязвимости.
 
 АНАЛИЗИРУЙ НА ПРЕДМЕТ:
@@ -99,7 +102,8 @@ func (a *LLMAnalyzer) buildPrompt(req *storage.RequestData, resp *storage.Respon
   "pentester_actions": ["список рекомендуемых действий для пентестера"]
 }`
 
-	userPrompt := fmt.Sprintf(`Проанализируй HTTP запрос:
+	userPrompt := fmt.Sprintf(
+		`Проанализируй HTTP запрос:
 
 URL: %s
 Method: %s
@@ -111,21 +115,22 @@ Response Body: %s
 
 Найди все потенциальные уязвимости и дай рекомендации для пентестера.`,
 		req.URL, req.Method, req.Headers, req.Body,
-		resp.Status, resp.Headers, resp.Body)
+		resp.Status, resp.Headers, resp.Body,
+	)
 
 	return systemPrompt + "\n\n" + userPrompt
 }
 
-func (a *LLMAnalyzer) parseAnalysisResult(response string) (*storage.AnalysisResult, error) {
+func (a *LLMAnalyzer) parseAnalysisResult(response string) (*llmmodels.AnalysisResult, error) {
 	// Простой парсинг JSON ответа от LLM
-	var result storage.AnalysisResult
+	var result llmmodels.AnalysisResult
 	if err := json.Unmarshal([]byte(response), &result); err != nil {
 		// Если не удалось распарсить JSON, создаем базовый результат
-		return &storage.AnalysisResult{
+		return &llmmodels.AnalysisResult{
 			VulnerabilitiesFound: false,
-			Findings:            []storage.VulnerabilityFinding{},
-			OverallRisk:         "Low",
-			PentesterActions:    []string{"Review raw response: " + response},
+			Findings:             []llmmodels.VulnerabilityFinding{},
+			OverallRisk:          "Low",
+			PentesterActions:     []string{"Review raw response: " + response},
 		}, nil
 	}
 

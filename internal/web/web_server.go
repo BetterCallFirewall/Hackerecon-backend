@@ -7,18 +7,24 @@ import (
 	"time"
 
 	"github.com/BetterCallFirewall/Hackerecon/internal/config"
-	"github.com/BetterCallFirewall/Hackerecon/internal/storage"
+	"github.com/BetterCallFirewall/Hackerecon/internal/middlewares"
+	proxymodels "github.com/BetterCallFirewall/Hackerecon/internal/models/proxy"
 	"github.com/BetterCallFirewall/Hackerecon/internal/websocket"
 )
 
+type storageI interface {
+	GetAllRequests() []*proxymodels.RequestData
+	GetRequest(id string) (*proxymodels.RequestData, bool)
+}
+
 type Server struct {
 	config  *config.Config
-	storage *storage.MemoryStorage
+	storage storageI
 	server  *http.Server
 	hub     *websocket.Hub
 }
 
-func NewServer(cfg *config.Config, store *storage.MemoryStorage) *Server {
+func NewServer(cfg *config.Config, store storageI) *Server {
 	hub := websocket.NewHub()
 	go hub.Run()
 
@@ -40,14 +46,18 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/ws", s.hub.ServeWS)
 
 	// Health check
-	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"ok"}`))
-	})
+	mux.HandleFunc(
+		"/health", func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"status":"ok"}`))
+		},
+	)
 
 	s.server = &http.Server{
-		Addr:    s.config.Web.ListenAddr,
-		Handler: s.enableCORS(mux),
+		Addr:         s.config.Web.ListenAddr,
+		Handler:      middlewares.CORS(mux),
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 10 * time.Second,
 	}
 
 	return s.server.ListenAndServe()
@@ -88,21 +98,6 @@ func (s *Server) handleGetRequest(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(req)
-}
-
-func (s *Server) enableCORS(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-
-		next.ServeHTTP(w, r)
-	})
 }
 
 func (s *Server) Broadcast(data interface{}) {

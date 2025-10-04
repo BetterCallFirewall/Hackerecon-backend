@@ -10,6 +10,12 @@ type Config struct {
 	Proxy ProxyConfig `yaml:"proxy"`
 	Web   WebConfig   `yaml:"web"`
 	Cert  CertConfig  `yaml:"cert"`
+	LLM   LLMConfig   `yaml:"llm"`
+}
+
+type LLMConfig struct {
+	Model string `yaml:"model"`
+	URL   string `yaml:"url"`
 }
 
 type ProxyConfig struct {
@@ -38,6 +44,10 @@ func Load() (*Config, error) {
 		},
 		Cert: CertConfig{
 			CertFile: os.Getenv("PROXY_CERT_FILE"),
+		},
+		LLM: LLMConfig{
+			Model: os.Getenv("LLM_MODEL"),
+			URL:   os.Getenv("LLM_URL"),
 		},
 	}, nil
 }

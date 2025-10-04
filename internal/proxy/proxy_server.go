@@ -10,22 +10,22 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/BetterCallFirewall/Hackerecon/internal/cert"
 	"github.com/BetterCallFirewall/Hackerecon/internal/config"
 	"github.com/BetterCallFirewall/Hackerecon/internal/storage"
-	"github.com/google/uuid"
 )
 
+type Broadcaster interface {
+	Broadcast(data interface{})
+}
 type Server struct {
 	config      *config.Config
 	storage     *storage.MemoryStorage
 	server      *http.Server
 	certManager *cert.CertManager
 	broadcaster Broadcaster
-}
-
-type Broadcaster interface {
-	Broadcast(data interface{})
 }
 
 func NewServer(cfg *config.Config, store *storage.MemoryStorage) *Server {
@@ -165,7 +165,6 @@ func (s *Server) forwardRequest(r *http.Request, targetURL string) (*http.Respon
 
 	return client.Do(req)
 }
-
 
 func (s *Server) copyResponse(w http.ResponseWriter, resp *http.Response) {
 	// Копируем заголовки ответа

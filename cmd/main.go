@@ -1,10 +1,15 @@
 package main
 
 import (
+	"context"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
 	"syscall"
+
+	"github.com/firebase/genkit/go/genkit"
+	"github.com/firebase/genkit/go/plugins/googlegenai"
 
 	"github.com/BetterCallFirewall/Hackerecon/internal/cert"
 	"github.com/BetterCallFirewall/Hackerecon/internal/config"
@@ -14,6 +19,9 @@ import (
 )
 
 func main() {
+	err := NewSecurityProxyWithGenkit("", "", "", "")
+	fmt.Println(err)
+
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
@@ -54,4 +62,24 @@ func main() {
 	log.Println("Shutting down...")
 	proxyServer.Stop()
 	webServer.Stop()
+}
+
+// NewSecurityProxyWithGenkit создает новый прокси с Genkit интеграцией
+func NewSecurityProxyWithGenkit(port, burpHost, burpPort, geminiAPIKey string) error {
+	ctx := context.Background()
+
+	fmt.Println("START")
+	// Инициализируем Genkit с плагинами
+	genkitApp := genkit.Init(
+		ctx,
+		genkit.WithPlugins(
+			&googlegenai.GoogleAI{
+				APIKey: geminiAPIKey,
+			},
+		),
+		genkit.WithDefaultModel("googleai/gemini-2.5-flash"),
+	)
+	fmt.Println(genkitApp)
+
+	return nil
 }

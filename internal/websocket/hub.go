@@ -12,12 +12,13 @@ import (
 
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
+		// временная заглушка
 		return true
 	},
 }
 
 type Hub struct {
-	clients    map[*Client]bool
+	client     *Client
 	broadcast  chan []byte
 	register   chan *Client
 	unregister chan *Client
@@ -25,9 +26,19 @@ type Hub struct {
 }
 
 type Client struct {
-	hub  *Hub
-	conn *websocket.Conn
-	send chan []byte
+	hub      *Hub
+	conn     *websocket.Conn
+	send     chan []byte
+	isActive bool
+}
+
+func NewHub() *Hub {
+	return &Hub{
+		client:     &Client{isActive: false},
+		broadcast:  make(chan []byte, 256),
+		register:   make(chan *Client),
+		unregister: make(chan *Client),
+	}
 }
 
 type Message struct {
@@ -36,44 +47,24 @@ type Message struct {
 	Timestamp int64       `json:"timestamp"`
 }
 
-func NewHub() *Hub {
-	return &Hub{
-		clients:    make(map[*Client]bool),
-		broadcast:  make(chan []byte, 256),
-		register:   make(chan *Client),
-		unregister: make(chan *Client),
-	}
-}
-
 func (h *Hub) Run() {
 	for {
 		select {
 		case client := <-h.register:
-			h.mutex.Lock()
-			h.clients[client] = true
-			h.mutex.Unlock()
-			log.Printf("WebSocket client connected, total: %d", len(h.clients))
-
-		case client := <-h.unregister:
-			h.mutex.Lock()
-			if _, ok := h.clients[client]; ok {
-				delete(h.clients, client)
-				close(client.send)
-			}
-			h.mutex.Unlock()
-			log.Printf("WebSocket client disconnected, total: %d", len(h.clients))
+			h.client = client
+			h.client.isActive = true
+			log.Printf("WebSocket client connected")
+		case <-h.unregister:
+			h.client.isActive = false
+			log.Printf("WebSocket client disconnected")
 
 		case message := <-h.broadcast:
-			h.mutex.RLock()
-			for client := range h.clients {
-				select {
-				case client.send <- message:
-				default:
-					close(client.send)
-					delete(h.clients, client)
-				}
+			select {
+			case h.client.send <- message:
+			default:
+				close(h.client.send)
+				h.client.isActive = false
 			}
-			h.mutex.RUnlock()
 		}
 	}
 }
@@ -106,9 +97,10 @@ func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	client := &Client{
-		hub:  h,
-		conn: conn,
-		send: make(chan []byte, 256),
+		isActive: true,
+		hub:      h,
+		conn:     conn,
+		send:     make(chan []byte, 256),
 	}
 
 	client.hub.register <- client

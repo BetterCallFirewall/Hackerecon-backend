@@ -50,8 +50,12 @@ func Load() (*Config, error) {
 			CertFile: os.Getenv("PROXY_CERT_FILE"),
 		},
 		LLM: LLMConfig{
-			Model: os.Getenv("LLM_MODEL"),
-			URL:   os.Getenv("LLM_URL"),
+			Model:    os.Getenv("LLM_MODEL"),
+			URL:      os.Getenv("LLM_URL"),
+			Port:     os.Getenv("PORT"),
+			BurpHost: os.Getenv("BURP_HOST"),
+			BurpPort: os.Getenv("BURP_PORT"),
+			ApiKey:   os.Getenv("API_KEY"),
 		},
 	}, nil
 }

@@ -1,20 +1,8 @@
-package main
+package driven
 
 import (
-	"bytes"
-	"context"
-	"crypto/tls"
-	"encoding/json"
-	"fmt"
-	"io"
 	"log"
-	"net"
 	"net/http"
-	"net/url"
-	"os"
-	"regexp"
-	"strings"
-	"sync"
 	"time"
 )
 
@@ -38,10 +26,10 @@ func (ps *SecurityProxyWithGenkit) Start() error {
 	}
 
 	log.Printf("🚀 Security Proxy запущен на порту %s", ps.port)
-	if ps.useUpstream {
-		log.Printf("📡 Upstream Burp Suite: %s:%s", ps.burpHost, ps.burpPort)
+	if ps.burpIntegration.enabled {
+		log.Printf("📡 Upstream Burp Suite: %s:%s", ps.burpIntegration.host, ps.burpIntegration.port)
 	}
-	log.Printf("🤖 Genkit AI анализ: Включен (Gemini)")
+	log.Printf("🤖 Genkit AI анализ: Включен: %s", ps.Analyzer.model)
 
 	return ps.server.ListenAndServe()
 }

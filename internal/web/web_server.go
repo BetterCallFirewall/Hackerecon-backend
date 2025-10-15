@@ -2,46 +2,46 @@ package web
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"time"
 
 	"github.com/BetterCallFirewall/Hackerecon/internal/config"
 	"github.com/BetterCallFirewall/Hackerecon/internal/middlewares"
-	proxymodels "github.com/BetterCallFirewall/Hackerecon/internal/models/proxy"
+	"github.com/BetterCallFirewall/Hackerecon/internal/models"
 	"github.com/BetterCallFirewall/Hackerecon/internal/websocket"
 )
 
-type storageI interface {
-	GetAllRequests() []*proxymodels.RequestData
-	GetRequest(id string) (*proxymodels.RequestData, bool)
+type broker interface {
+	Subscribe(topic string) chan models.SecurityAnalysisResponse
 }
 
 type Server struct {
-	config  *config.Config
-	storage storageI
-	server  *http.Server
-	hub     *websocket.Hub
+	server *http.Server
+	broker broker
+	hub    *websocket.Hub
 }
 
-func NewServer(cfg *config.Config, store storageI) *Server {
+func NewServer(cfg *config.Config, broker broker) *Server {
 	hub := websocket.NewHub()
+
+	server := &http.Server{
+		Addr:         cfg.Web.ListenAddr,
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 10 * time.Second,
+	}
 	go hub.Run()
 
 	return &Server{
-		config:  cfg,
-		storage: store,
-		hub:     hub,
+		server: server,
+		hub:    hub,
+		broker: broker,
 	}
 }
 
 func (s *Server) Start() error {
 	mux := http.NewServeMux()
-
-	mux.HandleFunc("/api/requests", s.handleGetRequests)
-	mux.HandleFunc("/api/requests/", s.handleGetRequest)
-
 	mux.HandleFunc("/ws", s.hub.ServeWS)
+	mux.HandleFunc("/api/analysis", s.GetAnalysis)
 
 	mux.HandleFunc(
 		"/health", func(w http.ResponseWriter, r *http.Request) {
@@ -50,13 +50,7 @@ func (s *Server) Start() error {
 		},
 	)
 
-	s.server = &http.Server{
-		Addr:         s.config.Web.ListenAddr,
-		Handler:      middlewares.CORS(mux),
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 10 * time.Second,
-	}
-
+	s.server.Handler = middlewares.CORS(mux)
 	return s.server.ListenAndServe()
 }
 
@@ -69,34 +63,11 @@ func (s *Server) Stop() error {
 	return nil
 }
 
-func (s *Server) handleGetRequests(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
+// подумать чо как дальше
+func (s *Server) Broadcast() {
+	ch := s.broker.Subscribe(models.LLMTopic)
+
+	for msg := range ch {
+		s.hub.Broadcast(msg)
 	}
-
-	requests := s.storage.GetAllRequests()
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(requests)
-}
-
-func (s *Server) handleGetRequest(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	id := r.URL.Path[len("/api/requests/"):]
-	req, ok := s.storage.GetRequest(id)
-	if !ok {
-		http.Error(w, "Request not found", http.StatusNotFound)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(req)
-}
-
-func (s *Server) Broadcast(data interface{}) {
-	s.hub.Broadcast(data)
 }

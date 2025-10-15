@@ -15,13 +15,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/BetterCallFirewall/Hackerecon/internal/config"
-	"github.com/BetterCallFirewall/Hackerecon/internal/models"
 	"github.com/PuerkitoBio/goquery"
 	"github.com/firebase/genkit/go/ai"
 	genkitcore "github.com/firebase/genkit/go/core"
 	"github.com/firebase/genkit/go/genkit"
 	"github.com/firebase/genkit/go/plugins/googlegenai"
+
+	"github.com/BetterCallFirewall/Hackerecon/internal/config"
+	"github.com/BetterCallFirewall/Hackerecon/internal/models"
 )
 
 var urlRegexes = []*regexp.Regexp{
@@ -120,6 +121,10 @@ func (bi *BurpIntegration) checkBurpHealth() bool {
 	return true
 }
 
+type broker interface {
+	Publish(topic string, msg models.SecurityAnalysisResponse)
+}
+
 // IsHealthy возвращает состояние здоровья Burp интеграции
 func (bi *BurpIntegration) IsHealthy() bool {
 	return bi.enabled && bi.healthCheck
@@ -146,13 +151,14 @@ type GenkitSecurityAnalyzer struct {
 	model             string
 	genkitApp         *genkit.Genkit
 	mutex             sync.RWMutex
+	broker            broker
 	reports           []models.VulnerabilityReport
 	secretPatterns    []*regexp.Regexp
 	analysisFlow      *genkitcore.Flow[*models.SecurityAnalysisRequest, *models.SecurityAnalysisResponse, struct{}]
 	batchAnalysisFlow *genkitcore.Flow[*[]models.SecurityAnalysisRequest, *[]models.SecurityAnalysisResponse, struct{}]
 }
 
-func NewSecurityProxyWithGenkit(cfg config.LLMConfig) (*SecurityProxyWithGenkit, error) {
+func NewSecurityProxyWithGenkit(cfg config.LLMConfig, broker broker) (*SecurityProxyWithGenkit, error) {
 	ctx := context.Background()
 
 	// Инициализируем Genkit с плагинами
@@ -166,7 +172,7 @@ func NewSecurityProxyWithGenkit(cfg config.LLMConfig) (*SecurityProxyWithGenkit,
 		genkit.WithDefaultModel(cfg.Model),
 	)
 
-	analyzer, err := newGenkitSecurityAnalyzer(genkitApp, cfg.Model)
+	analyzer, err := newGenkitSecurityAnalyzer(genkitApp, cfg.Model, broker)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Analyzer: %w", err)
 	}
@@ -181,10 +187,11 @@ func NewSecurityProxyWithGenkit(cfg config.LLMConfig) (*SecurityProxyWithGenkit,
 	}, nil
 }
 
-func newGenkitSecurityAnalyzer(genkitApp *genkit.Genkit, model string) (*GenkitSecurityAnalyzer, error) {
+func newGenkitSecurityAnalyzer(genkitApp *genkit.Genkit, model string, broker broker) (*GenkitSecurityAnalyzer, error) {
 	analyzer := &GenkitSecurityAnalyzer{
 		model:          model,
 		genkitApp:      genkitApp,
+		broker:         broker,
 		reports:        make([]models.VulnerabilityReport, 0),
 		secretPatterns: createSecretRegexPatterns(),
 	}
@@ -250,6 +257,8 @@ func (analyzer *GenkitSecurityAnalyzer) AnalyzeHTTPTraffic(
 	analyzer.mutex.Lock()
 	analyzer.reports = append(analyzer.reports, *report)
 	analyzer.mutex.Unlock()
+	// пишем отчет в брокера
+	analyzer.broker.Publish(models.LLMTopic, report.AnalysisResult)
 
 	// Логируем критические находки
 	if result.HasVulnerability && (result.RiskLevel == "high" || result.RiskLevel == "critical") {

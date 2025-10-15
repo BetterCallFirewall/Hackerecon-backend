@@ -5,7 +5,6 @@ go 1.25.1
 require (
 	github.com/PuerkitoBio/goquery v1.10.3
 	github.com/firebase/genkit/go v1.0.5
-	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/joho/godotenv v1.5.1
 )
@@ -24,6 +23,7 @@ require (
 	github.com/google/dotprompt/go v0.0.0-20250923103342-a8a91d1dff59 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/s2a-go v0.1.9 // indirect
+	github.com/google/uuid v1.6.0 // indirect
 	github.com/googleapis/enterprise-certificate-proxy v0.3.6 // indirect
 	github.com/googleapis/gax-go/v2 v2.14.2 // indirect
 	github.com/invopop/jsonschema v0.13.0 // indirect

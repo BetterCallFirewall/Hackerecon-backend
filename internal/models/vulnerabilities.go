@@ -24,6 +24,8 @@ type SecurityAnalysisRequest struct {
 	ResponseBody  string            `json:"response_body,omitempty" jsonschema:"description=Response body content"`
 	ContentType   string            `json:"content_type" jsonschema:"description=Response content type"`
 	ExtractedData ExtractedData     `json:"extracted_data" jsonschema:"description=Pre-extracted data from content"`
+
+	SiteContext *SiteContext `json:"site_context" jsonschema:"description=Contextual information about the target site"`
 }
 
 // ExtractedData данные, извлеченные из контента перед анализом
@@ -46,6 +48,11 @@ type ExtractedSecret struct {
 	Location   string  `json:"location" jsonschema:"description=Where the secret was found (request/response)"`
 }
 
+type DataObject struct {
+	Name   string   `json:"name" jsonschema:"description=The name of the data object (e.g., 'user', 'order')"`
+	Fields []string `json:"fields" jsonschema:"description=A list of fields found for this object (e.g., ['id', 'email', 'role'])"`
+}
+
 // SecurityAnalysisResponse структурированный ответ от LLM
 type SecurityAnalysisResponse struct {
 	URL                string              `json:"url" jsonschema:"description=Analyzed URL"`
@@ -58,6 +65,9 @@ type SecurityAnalysisResponse struct {
 	Recommendations    []string            `json:"recommendations" jsonschema:"description=Actionable security recommendations"`
 	ExtractedSecrets   []ExtractedSecret   `json:"extracted_secrets" jsonschema:"description=Found secrets and sensitive data"`
 	Timestamp          time.Time           `json:"timestamp" jsonschema:"description=Analysis timestamp"`
+
+	IdentifiedUserRole    string       `json:"identified_user_role,omitempty" jsonschema:"description=The user role identified in this request (e.g., 'guest', 'user', 'admin')"`
+	IdentifiedDataObjects []DataObject `json:"identified_data_objects,omitempty" jsonschema:"description=Data objects and their fields found in the request/response"`
 }
 
 // SecurityCheckItem элемент чеклиста для ручной проверки

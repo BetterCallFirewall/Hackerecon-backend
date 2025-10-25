@@ -11,7 +11,7 @@ import (
 func startGenkitReportServer(analyzer *driven.GenkitSecurityAnalyzer) {
 	http.HandleFunc(
 		"/api/reports", func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
 			w.Header().Set("Access-Control-Allow-Origin", "*")
 
 			reports := analyzer.GetReports()
@@ -21,7 +21,7 @@ func startGenkitReportServer(analyzer *driven.GenkitSecurityAnalyzer) {
 
 	http.HandleFunc(
 		"/api/high-risk", func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
 			w.Header().Set("Access-Control-Allow-Origin", "*")
 
 			highRiskReports := analyzer.GetHighRiskReports()
@@ -31,7 +31,7 @@ func startGenkitReportServer(analyzer *driven.GenkitSecurityAnalyzer) {
 
 	http.HandleFunc(
 		"/api/stats", func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
 			w.Header().Set("Access-Control-Allow-Origin", "*")
 
 			stats := analyzer.GetSummaryStats()

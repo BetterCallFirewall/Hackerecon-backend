@@ -38,6 +38,28 @@ type BurpIntegration struct {
 	healthCheck bool
 }
 
+type SecurityProxyWithGenkit struct {
+	port            string
+	Analyzer        *GenkitSecurityAnalyzer
+	server          *http.Server
+	burpIntegration *BurpIntegration
+	fallbackMode    bool
+}
+
+// GenkitSecurityAnalyzer анализатор с использованием Genkit
+type GenkitSecurityAnalyzer struct {
+	model             string
+	genkitApp         *genkit.Genkit
+	mutex             sync.RWMutex
+	reports           []models.VulnerabilityReport
+	secretPatterns    []*regexp.Regexp
+	analysisFlow      *genkitcore.Flow[*models.SecurityAnalysisRequest, *models.SecurityAnalysisResponse, struct{}]
+	batchAnalysisFlow *genkitcore.Flow[*[]models.SecurityAnalysisRequest, *[]models.SecurityAnalysisResponse, struct{}]
+
+	siteContexts map[string]*models.SiteContext
+	contextMutex sync.RWMutex
+}
+
 // NewBurpIntegration создает новую интеграцию с Burp
 func NewBurpIntegration(host, port string) *BurpIntegration {
 	if host == "" || port == "" {
@@ -133,25 +155,6 @@ func (bi *BurpIntegration) GetClient() *http.Client {
 	return http.DefaultClient
 }
 
-type SecurityProxyWithGenkit struct {
-	port            string
-	Analyzer        *GenkitSecurityAnalyzer
-	server          *http.Server
-	burpIntegration *BurpIntegration
-	fallbackMode    bool
-}
-
-// GenkitSecurityAnalyzer анализатор с использованием Genkit
-type GenkitSecurityAnalyzer struct {
-	model             string
-	genkitApp         *genkit.Genkit
-	mutex             sync.RWMutex
-	reports           []models.VulnerabilityReport
-	secretPatterns    []*regexp.Regexp
-	analysisFlow      *genkitcore.Flow[*models.SecurityAnalysisRequest, *models.SecurityAnalysisResponse, struct{}]
-	batchAnalysisFlow *genkitcore.Flow[*[]models.SecurityAnalysisRequest, *[]models.SecurityAnalysisResponse, struct{}]
-}
-
 func NewSecurityProxyWithGenkit(cfg config.LLMConfig) (*SecurityProxyWithGenkit, error) {
 	ctx := context.Background()
 
@@ -187,6 +190,7 @@ func newGenkitSecurityAnalyzer(genkitApp *genkit.Genkit, model string) (*GenkitS
 		genkitApp:      genkitApp,
 		reports:        make([]models.VulnerabilityReport, 0),
 		secretPatterns: createSecretRegexPatterns(),
+		siteContexts:   make(map[string]*models.SiteContext),
 	}
 	// Определяем основной flow для анализа безопасности
 	analyzer.analysisFlow = genkit.DefineFlow(
@@ -209,24 +213,84 @@ func newGenkitSecurityAnalyzer(genkitApp *genkit.Genkit, model string) (*GenkitS
 	return analyzer, nil
 }
 
+func (analyzer *GenkitSecurityAnalyzer) getOrCreateSiteContext(host string) *models.SiteContext {
+	analyzer.contextMutex.Lock()
+	defer analyzer.contextMutex.Unlock()
+
+	if context, exists := analyzer.siteContexts[host]; exists {
+		return context
+	}
+
+	newContext := models.NewSiteContext(host)
+	analyzer.siteContexts[host] = newContext
+	return newContext
+}
+
+// updateSiteContext обновляет контекст на основе ответа от LLM
+func (analyzer *GenkitSecurityAnalyzer) updateSiteContext(host string, llmResponse *models.SecurityAnalysisResponse) {
+	analyzer.contextMutex.Lock()
+	defer analyzer.contextMutex.Unlock()
+
+	context, exists := analyzer.siteContexts[host]
+	if !exists {
+		return // Должен уже существовать
+	}
+
+	// Обновляем роли
+	if llmResponse.IdentifiedUserRole != "" {
+		context.UserRoles[llmResponse.IdentifiedUserRole] = true
+	}
+
+	// ИЗМЕНЕНО: Обновляем объекты данных, итерируясь по срезу
+	if len(llmResponse.IdentifiedDataObjects) > 0 {
+		for _, dataObject := range llmResponse.IdentifiedDataObjects {
+			name := dataObject.Name
+			fields := dataObject.Fields
+			if name == "" || len(fields) == 0 {
+				continue
+			}
+
+			// Логика слияния полей остается той же
+			existingFields := make(map[string]bool)
+			for _, field := range context.DataObjects[name] {
+				existingFields[field] = true
+			}
+			for _, newField := range fields {
+				if !existingFields[newField] {
+					context.DataObjects[name] = append(context.DataObjects[name], newField)
+				}
+			}
+		}
+	}
+
+	// Обновляем эндпоинты
+	context.DiscoveredEndpoints[llmResponse.URL] = true
+	context.LastUpdated = time.Now()
+}
+
 // AnalyzeHTTPTraffic анализирует HTTP трафик с помощью Genkit flows
 func (analyzer *GenkitSecurityAnalyzer) AnalyzeHTTPTraffic(
-	ctx context.Context, url, method string, headers map[string]string, reqBody, respBody, contentType string,
+	ctx context.Context, req *http.Request, reqBody, respBody, contentType string,
 ) (*models.VulnerabilityReport, error) {
 	startTime := time.Now()
 
+	siteContext := analyzer.getOrCreateSiteContext(req.URL.Host)
+
 	// Извлекаем данные из контента
 	extractedData := analyzer.extractDataFromContent(reqBody, respBody, contentType)
+	preparedRequestBody := analyzer.prepareContentForLLM(reqBody, req.Header.Get("Content-Type"))
+	preparedResponseBody := analyzer.prepareContentForLLM(respBody, contentType)
 
 	// Подготавливаем запрос для анализа
 	analysisReq := &models.SecurityAnalysisRequest{
-		URL:           url,
-		Method:        method,
-		Headers:       headers,
-		RequestBody:   reqBody,
-		ResponseBody:  respBody,
+		URL:           req.URL.String(),
+		Method:        req.Method,
+		Headers:       convertHeaders(req.Header),
+		RequestBody:   preparedRequestBody,
+		ResponseBody:  preparedResponseBody,
 		ContentType:   contentType,
 		ExtractedData: *extractedData,
+		SiteContext:   siteContext,
 	}
 
 	// Выполняем анализ через Genkit flow
@@ -234,6 +298,8 @@ func (analyzer *GenkitSecurityAnalyzer) AnalyzeHTTPTraffic(
 	if err != nil {
 		return nil, fmt.Errorf("security analysis failed: %w", err)
 	}
+
+	analyzer.updateSiteContext(req.URL.Host, result)
 
 	// Создаем полный отчет
 	report := &models.VulnerabilityReport{
@@ -255,7 +321,7 @@ func (analyzer *GenkitSecurityAnalyzer) AnalyzeHTTPTraffic(
 	if result.HasVulnerability && (result.RiskLevel == "high" || result.RiskLevel == "critical") {
 		log.Printf(
 			"🚨 КРИТИЧЕСКАЯ УЯЗВИМОСТЬ: %s - Risk: %s, Confidence: %.2f",
-			url, result.RiskLevel, result.ConfidenceScore,
+			req.URL.String(), result.RiskLevel, result.ConfidenceScore,
 		)
 		log.Printf("💡 AI Комментарий: %s", result.AIComment)
 
@@ -265,6 +331,45 @@ func (analyzer *GenkitSecurityAnalyzer) AnalyzeHTTPTraffic(
 	}
 
 	return report, nil
+}
+
+func convertHeaders(h http.Header) map[string]string {
+	headers := make(map[string]string)
+	for k, v := range h {
+		if len(v) > 0 {
+			headers[k] = v[0]
+		}
+	}
+	return headers
+}
+
+func (analyzer *GenkitSecurityAnalyzer) prepareContentForLLM(content, contentType string) string {
+	if len(content) == 0 {
+		return "empty"
+	}
+
+	// Для HTML извлекаем только текст без тегов и разметки, чтобы модель поняла суть страницы
+	if strings.Contains(contentType, "html") {
+		doc, err := goquery.NewDocumentFromReader(strings.NewReader(content))
+		if err == nil {
+			// Удаляем скрипты и стили, чтобы они не загромождали контекст
+			doc.Find("script, style").Remove()
+			// Возвращаем только текст из body
+			textContent := doc.Find("body").Text()
+			// Заменяем множественные пробелы и переносы строк на один пробел
+			re := regexp.MustCompile(`\s+`)
+			textContent = re.ReplaceAllString(textContent, " ")
+			return truncateString("HTML Text Content: "+textContent, 2000) // Ограничиваем до 2000 символов
+		}
+	}
+
+	// Для JavaScript и JSON просто обрезаем, т.к. их структура важна
+	if strings.Contains(contentType, "javascript") || strings.Contains(contentType, "json") {
+		return truncateString(content, 2000) // Ограничиваем до 2000 символов
+	}
+
+	// Для всего остального (например, text/plain) тоже обрезаем
+	return truncateString(content, 1000)
 }
 
 // extractDataFromContent извлекает данные из HTTP контента
@@ -795,9 +900,42 @@ func (ps *SecurityProxyWithGenkit) transfer(destination io.WriteCloser, source i
 	io.Copy(destination, source)
 }
 
+var skippableContentTypePrefixes = []string{
+	"image/", "font/", "video/", "audio/", "application/font-woff", "application/octet-stream",
+}
+
+var skippableFileExtensions = []string{
+	".css", ".ico", ".svg", ".png", ".jpg", ".jpeg", ".gif", ".woff", ".woff2", ".ttf", ".eot", ".mp4", ".mp3",
+}
+
+func isSkippableContent(contentType, urlPath string) bool {
+	// Проверка по Content-Type
+	for _, prefix := range skippableContentTypePrefixes {
+		if strings.HasPrefix(contentType, prefix) {
+			return true
+		}
+	}
+
+	// Проверка по расширению файла в URL
+	lowerPath := strings.ToLower(urlPath)
+	for _, ext := range skippableFileExtensions {
+		if strings.HasSuffix(lowerPath, ext) {
+			return true
+		}
+	}
+
+	return false
+}
+
 func (ps *SecurityProxyWithGenkit) analyzeTraffic(
 	req *http.Request, reqBody string, resp *http.Response, respBody string,
 ) {
+	contentType := resp.Header.Get("Content-Type")
+	if isSkippableContent(contentType, req.URL.Path) {
+		log.Printf("⚪️ Пропуск анализа для %s (Content-Type: %s)", req.URL.String(), contentType)
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -808,10 +946,7 @@ func (ps *SecurityProxyWithGenkit) analyzeTraffic(
 		}
 	}
 
-	_, err := ps.Analyzer.AnalyzeHTTPTraffic(
-		ctx, req.URL.String(), req.Method, headers,
-		reqBody, respBody, resp.Header.Get("Content-Type"),
-	)
+	_, err := ps.Analyzer.AnalyzeHTTPTraffic(ctx, req, reqBody, respBody, contentType)
 	if err != nil {
 		log.Printf("❌ Ошибка анализа %s: %v", req.URL.String(), err)
 	}

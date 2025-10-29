@@ -58,6 +58,8 @@ func (analyzer *GenkitSecurityAnalyzer) buildSecurityAnalysisPrompt(req *models.
     *   Включи в ответ новые поля 'identified_user_role'' и 'identified_data_objects''.
 
 В первую очередь сосредоточься на анализе бизнес-логики и поиске уязвимостей, связанных с обходом бизнес-правил.
+Также понижай уровень риска уязвимостей, для которых необходимо подбирать ключи.
+Не обращай внимание на протокол HTTP вместо HTTPS.
 Ответь строго в JSON формате согласно предоставленной схеме.
 `,
 		req.SiteContext.Host,
@@ -183,10 +185,71 @@ func removeDuplicates(slice []string) []string {
 	return result
 }
 
+func copyHeaders(dst, src http.Header) {
+	// Заголовки, которые нужно исключить или обработать особо
+	excludeHeaders := map[string]bool{
+		"Connection":          true,
+		"Proxy-Connection":    true,
+		"Proxy-Authenticate":  true,
+		"Proxy-Authorization": true,
+		"Te":                  true,
+		"Trailers":            true,
+		"Upgrade":             true,
+	}
+
+	for name, values := range src {
+		if excludeHeaders[name] {
+			continue
+		}
+
+		// Копируем остальные заголовки
+		for _, value := range values {
+			dst.Add(name, value)
+		}
+	}
+}
+
 func copyHeader(dst, src http.Header) {
 	for k, vv := range src {
 		for _, v := range vv {
 			dst.Add(k, v)
 		}
 	}
+}
+
+func convertHeaders(h http.Header) map[string]string {
+	headers := make(map[string]string)
+	for k, v := range h {
+		if len(v) > 0 {
+			headers[k] = v[0]
+		}
+	}
+	return headers
+}
+
+var skippableContentTypePrefixes = []string{
+	"image/", "font/", "video/", "audio/", "application/font-woff", "application/octet-stream",
+}
+
+var skippableFileExtensions = []string{
+	".css", ".ico", ".svg", ".png", ".jpg", ".jpeg", ".gif", ".woff", ".woff2", ".ttf", ".eot", ".mp4", ".mp3",
+}
+
+func isSkippableContent(contentType, urlPath string) bool {
+	// Проверка по Content-Type
+	for _, prefix := range skippableContentTypePrefixes {
+		if strings.HasPrefix(contentType, prefix) {
+			return true
+		}
+	}
+
+	// Проверка по расширению файла в URL
+	lowerPath := strings.ToLower(urlPath)
+	for _, ext := range skippableFileExtensions {
+		if strings.HasSuffix(lowerPath, ext) {
+			return true
+		}
+	}
+
+	return false
 }

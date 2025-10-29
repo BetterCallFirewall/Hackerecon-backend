@@ -6,7 +6,6 @@ type HTMLData struct {
 	URLs        []string
 }
 
-// JSFunction JavaScript функция
 type JSFunction struct {
 	Name       string   `json:"name" jsonschema:"description=Function name"`
 	Parameters []string `json:"parameters" jsonschema:"description=Function parameters"`

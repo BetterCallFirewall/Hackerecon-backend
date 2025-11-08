@@ -24,10 +24,10 @@ type ProviderConfig struct {
 	Model     string // "gemini-1.5-pro", "gemini-1.5-flash", etc.
 
 	// --- Для Generic провайдера ---
-	Name    string    // Название (для логирования)
-	BaseURL string    // Базовый URL API
-	APIKey  string    // API ключ (опционально)
-	Format  APIFormat // Формат API ("openai", "ollama", "raw")
+	Name    string
+	BaseURL string
+	APIKey  string
+	Format  APIFormat
 }
 
 // NewProvider создаёт провайдер на основе конфигурации
@@ -46,13 +46,15 @@ func NewProvider(cfg ProviderConfig) (Provider, error) {
 		if cfg.BaseURL == "" {
 			return nil, fmt.Errorf("generic provider requires BaseURL")
 		}
-		return NewGenericProvider(GenericConfig{
-			Name:    cfg.Name,
-			Model:   cfg.Model,
-			BaseURL: cfg.BaseURL,
-			APIKey:  cfg.APIKey,
-			Format:  cfg.Format,
-		}), nil
+		return NewGenericProvider(
+			GenericConfig{
+				Name:    cfg.Name,
+				Model:   cfg.Model,
+				BaseURL: cfg.BaseURL,
+				APIKey:  cfg.APIKey,
+				Format:  cfg.Format,
+			},
+		), nil
 
 	default:
 		return nil, fmt.Errorf("unknown provider type: %s", cfg.Type)
@@ -67,12 +69,14 @@ func NewProvider(cfg ProviderConfig) (Provider, error) {
 //	provider := llm.NewOllamaProvider("http://localhost:11434", "llama3.1:8b")
 func NewOllamaProvider(baseURL, model string) Provider {
 	name := fmt.Sprintf("ollama-%s", model)
-	return NewGenericProvider(GenericConfig{
-		Name:    name,
-		Model:   model,
-		BaseURL: baseURL,
-		Format:  FormatOllama,
-	})
+	return NewGenericProvider(
+		GenericConfig{
+			Name:    name,
+			Model:   model,
+			BaseURL: baseURL,
+			Format:  FormatOllama,
+		},
+	)
 }
 
 // NewLocalAIProvider - helper для создания LocalAI провайдера
@@ -80,12 +84,14 @@ func NewOllamaProvider(baseURL, model string) Provider {
 //
 //	provider := llm.NewLocalAIProvider("http://localhost:8080", "gpt-4")
 func NewLocalAIProvider(baseURL, model string) Provider {
-	return NewGenericProvider(GenericConfig{
-		Name:    "localai",
-		Model:   model,
-		BaseURL: baseURL,
-		Format:  FormatOpenAI,
-	})
+	return NewGenericProvider(
+		GenericConfig{
+			Name:    "localai",
+			Model:   model,
+			BaseURL: baseURL,
+			Format:  FormatOpenAI,
+		},
+	)
 }
 
 // NewLMStudioProvider - helper для создания LM Studio провайдера
@@ -93,10 +99,12 @@ func NewLocalAIProvider(baseURL, model string) Provider {
 //
 //	provider := llm.NewLMStudioProvider("http://localhost:1234", "llama-3.2-3b")
 func NewLMStudioProvider(baseURL, model string) Provider {
-	return NewGenericProvider(GenericConfig{
-		Name:    "lm-studio",
-		Model:   model,
-		BaseURL: baseURL,
-		Format:  FormatOpenAI,
-	})
+	return NewGenericProvider(
+		GenericConfig{
+			Name:    "lm-studio",
+			Model:   model,
+			BaseURL: baseURL,
+			Format:  FormatOpenAI,
+		},
+	)
 }

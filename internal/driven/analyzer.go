@@ -27,15 +27,14 @@ var urlRegexes = []*regexp.Regexp{
 
 // GenkitSecurityAnalyzer анализатор с использованием Genkit
 type GenkitSecurityAnalyzer struct {
-	model             string
-	llmProvider       llm.Provider // Опциональный провайдер (если используется generic)
-	WsHub             *websocket.WebsocketManager
-	genkitApp         *genkit.Genkit
-	mutex             sync.RWMutex
-	reports           []models.VulnerabilityReport
-	secretPatterns    []*regexp.Regexp
-	analysisFlow      *genkitcore.Flow[*models.SecurityAnalysisRequest, *models.SecurityAnalysisResponse, struct{}]
-	batchAnalysisFlow *genkitcore.Flow[*[]models.SecurityAnalysisRequest, *[]models.SecurityAnalysisResponse, struct{}]
+	model          string
+	llmProvider    llm.Provider // Опциональный провайдер (если используется generic)
+	WsHub          *websocket.WebsocketManager
+	genkitApp      *genkit.Genkit
+	mutex          sync.RWMutex
+	reports        []models.VulnerabilityReport
+	secretPatterns []*regexp.Regexp
+	analysisFlow   *genkitcore.Flow[*models.SecurityAnalysisRequest, *models.SecurityAnalysisResponse, struct{}]
 
 	siteContexts map[string]*models.SiteContext
 	contextMutex sync.RWMutex
@@ -57,16 +56,6 @@ func newGenkitSecurityAnalyzer(genkitApp *genkit.Genkit, model string, wsHub *we
 		genkitApp, "securityAnalysisFlow",
 		func(ctx context.Context, req *models.SecurityAnalysisRequest) (*models.SecurityAnalysisResponse, error) {
 			return analyzer.performSecurityAnalysis(ctx, req)
-		},
-	)
-
-	// Определяем batch flow для массового анализа
-	analyzer.batchAnalysisFlow = genkit.DefineFlow(
-		genkitApp, "batchSecurityAnalysisFlow",
-		func(ctx context.Context, requests *[]models.SecurityAnalysisRequest) (
-			*[]models.SecurityAnalysisResponse, error,
-		) {
-			return analyzer.performBatchAnalysis(ctx, requests)
 		},
 	)
 
@@ -95,15 +84,6 @@ func newSecurityAnalyzerWithProvider(
 		genkitApp, "securityAnalysisFlow",
 		func(ctx context.Context, req *models.SecurityAnalysisRequest) (*models.SecurityAnalysisResponse, error) {
 			return analyzer.performSecurityAnalysis(ctx, req)
-		},
-	)
-
-	analyzer.batchAnalysisFlow = genkit.DefineFlow(
-		genkitApp, "batchSecurityAnalysisFlow",
-		func(ctx context.Context, requests *[]models.SecurityAnalysisRequest) (
-			*[]models.SecurityAnalysisResponse, error,
-		) {
-			return analyzer.performBatchAnalysis(ctx, requests)
 		},
 	)
 
@@ -146,25 +126,6 @@ func (analyzer *GenkitSecurityAnalyzer) performSecurityAnalysis(
 	result.ExtractedSecrets = append(result.ExtractedSecrets, req.ExtractedData.Secrets...)
 
 	return result, nil
-}
-
-// performBatchAnalysis выполняет массовый анализ запросов
-func (analyzer *GenkitSecurityAnalyzer) performBatchAnalysis(
-	ctx context.Context, requests *[]models.SecurityAnalysisRequest,
-) (*[]models.SecurityAnalysisResponse, error) {
-	results := make([]models.SecurityAnalysisResponse, 0, len(*requests))
-
-	// Анализируем каждый запрос (можно распараллелить)
-	for _, req := range *requests {
-		result, err := analyzer.performSecurityAnalysis(ctx, &req)
-		if err != nil {
-			log.Printf("Error analyzing request %s: %v", req.URL, err)
-			continue
-		}
-		results = append(results, *result)
-	}
-
-	return &results, nil
 }
 
 // AnalyzeHTTPTraffic анализирует HTTP трафик с помощью Genkit flows

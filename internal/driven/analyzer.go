@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/BetterCallFirewall/Hackerecon/internal/llm"
 	"github.com/BetterCallFirewall/Hackerecon/internal/models"
 	"github.com/BetterCallFirewall/Hackerecon/internal/websocket"
 	"github.com/PuerkitoBio/goquery"
@@ -27,6 +28,7 @@ var urlRegexes = []*regexp.Regexp{
 // GenkitSecurityAnalyzer анализатор с использованием Genkit
 type GenkitSecurityAnalyzer struct {
 	model             string
+	llmProvider       llm.Provider // Опциональный провайдер (если используется generic)
 	WsHub             *websocket.WebsocketManager
 	genkitApp         *genkit.Genkit
 	mutex             sync.RWMutex
@@ -71,21 +73,68 @@ func newGenkitSecurityAnalyzer(genkitApp *genkit.Genkit, model string, wsHub *we
 	return analyzer, nil
 }
 
-// performSecurityAnalysis выполняет анализ безопасности с помощью Genkit
+// newSecurityAnalyzerWithProvider создаёт анализатор с кастомным LLM провайдером
+func newSecurityAnalyzerWithProvider(
+	genkitApp *genkit.Genkit,
+	model string,
+	provider llm.Provider,
+	wsHub *websocket.WebsocketManager,
+) (*GenkitSecurityAnalyzer, error) {
+	analyzer := &GenkitSecurityAnalyzer{
+		model:          model,
+		llmProvider:    provider,
+		WsHub:          wsHub,
+		genkitApp:      genkitApp,
+		reports:        make([]models.VulnerabilityReport, 0),
+		secretPatterns: createSecretRegexPatterns(),
+		siteContexts:   make(map[string]*models.SiteContext),
+	}
+
+	// Определяем flows (они будут использовать llmProvider)
+	analyzer.analysisFlow = genkit.DefineFlow(
+		genkitApp, "securityAnalysisFlow",
+		func(ctx context.Context, req *models.SecurityAnalysisRequest) (*models.SecurityAnalysisResponse, error) {
+			return analyzer.performSecurityAnalysis(ctx, req)
+		},
+	)
+
+	analyzer.batchAnalysisFlow = genkit.DefineFlow(
+		genkitApp, "batchSecurityAnalysisFlow",
+		func(ctx context.Context, requests *[]models.SecurityAnalysisRequest) (
+			*[]models.SecurityAnalysisResponse, error,
+		) {
+			return analyzer.performBatchAnalysis(ctx, requests)
+		},
+	)
+
+	return analyzer, nil
+}
+
+// performSecurityAnalysis выполняет анализ безопасности с помощью Genkit или провайдера
 func (analyzer *GenkitSecurityAnalyzer) performSecurityAnalysis(
 	ctx context.Context, req *models.SecurityAnalysisRequest,
 ) (*models.SecurityAnalysisResponse, error) {
-	// Создаем детальный промпт для анализа
-	prompt := analyzer.buildSecurityAnalysisPrompt(req)
+	var result *models.SecurityAnalysisResponse
+	var err error
 
-	// Используем Genkit для генерации структурированного ответа
-	result, _, err := genkit.GenerateData[models.SecurityAnalysisResponse](
-		ctx, analyzer.genkitApp,
-		ai.WithPrompt(prompt),
-	)
+	// Если установлен кастомный провайдер, используем его
+	if analyzer.llmProvider != nil {
+		result, err = analyzer.llmProvider.GenerateSecurityAnalysis(ctx, req)
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate security analysis: %w", err)
+		}
+	} else {
+		// Иначе используем Genkit (Gemini)
+		prompt := analyzer.buildSecurityAnalysisPrompt(req)
 
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate security analysis: %w", err)
+		result, _, err = genkit.GenerateData[models.SecurityAnalysisResponse](
+			ctx, analyzer.genkitApp,
+			ai.WithPrompt(prompt),
+		)
+
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate security analysis: %w", err)
+		}
 	}
 
 	// Устанавливаем timestamp и URL
@@ -170,14 +219,25 @@ func (analyzer *GenkitSecurityAnalyzer) AnalyzeHTTPTraffic(
 	// Логируем критические находки
 	if result.HasVulnerability && (result.RiskLevel == "high" || result.RiskLevel == "critical") {
 		log.Printf(
-			"🚨 КРИТИЧЕСКАЯ УЯЗВИМОСТЬ: %s - Risk: %s, Confidence: %.2f",
-			req.URL.String(), result.RiskLevel, result.ConfidenceScore,
+			"🚨 КРИТИЧЕСКАЯ УЯЗВИМОСТЬ: %s - Risk: %s",
+			req.URL.String(), result.RiskLevel,
 		)
 		log.Printf("💡 AI Комментарий: %s", result.AIComment)
-		analyzer.WsHub.Broadcast(result)
-		for i, check := range result.SecurityChecklist {
-			log.Printf("✅ Чек %d: %s (Приоритет: %s)", i+1, check.CheckName, check.Priority)
+
+		// Логируем чеклист для ручной проверки
+		if len(result.SecurityChecklist) > 0 {
+			log.Printf("📋 Варианты проверки уязвимости (%d):", len(result.SecurityChecklist))
+			for i, check := range result.SecurityChecklist {
+				log.Printf("   ┣━ Тест %d: %s", i+1, check.Action)
+				log.Printf("   ┃  Что проверить: %s", check.Description)
+				log.Printf("   ┗━ Ожидается: %s", check.Expected)
+				if i < len(result.SecurityChecklist)-1 {
+					log.Println("   ┃")
+				}
+			}
 		}
+
+		analyzer.WsHub.Broadcast(result)
 	}
 
 	return report, nil

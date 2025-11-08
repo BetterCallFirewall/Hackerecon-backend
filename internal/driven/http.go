@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/BetterCallFirewall/Hackerecon/internal/config"
+	"github.com/BetterCallFirewall/Hackerecon/internal/llm"
 	"github.com/BetterCallFirewall/Hackerecon/internal/websocket"
 	"github.com/firebase/genkit/go/genkit"
 	"github.com/firebase/genkit/go/plugins/googlegenai"
@@ -31,21 +32,60 @@ func NewSecurityProxyWithGenkit(cfg config.LLMConfig, wsHub *websocket.Websocket
 	*SecurityProxyWithGenkit, error,
 ) {
 	ctx := context.Background()
+	var analyzer *GenkitSecurityAnalyzer
+	var err error
 
-	// Инициализируем Genkit с плагинами
-	genkitApp := genkit.Init(
-		ctx,
-		genkit.WithPlugins(
-			&googlegenai.GoogleAI{
-				APIKey: cfg.ApiKey,
-			},
-		),
-		genkit.WithDefaultModel(cfg.Model),
-	)
+	// Выбираем провайдера на основе конфигурации
+	switch cfg.Provider {
+	case "gemini", "": // Пустое значение = gemini по умолчанию
+		// Инициализируем Genkit с плагинами
+		genkitApp := genkit.Init(
+			ctx,
+			genkit.WithPlugins(
+				&googlegenai.GoogleAI{
+					APIKey: cfg.ApiKey,
+				},
+			),
+			genkit.WithDefaultModel(cfg.Model),
+		)
 
-	analyzer, err := newGenkitSecurityAnalyzer(genkitApp, cfg.Model, wsHub)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create Analyzer: %w", err)
+		analyzer, err = newGenkitSecurityAnalyzer(genkitApp, cfg.Model, wsHub)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create Gemini analyzer: %w", err)
+		}
+		log.Printf("✅ Используется Gemini модель: %s", cfg.Model)
+
+	case "generic":
+		// Создаём Generic провайдер
+		var format llm.APIFormat
+		switch cfg.Format {
+		case "ollama":
+			format = llm.FormatOllama
+		case "raw":
+			format = llm.FormatRaw
+		default:
+			format = llm.FormatOpenAI // По умолчанию OpenAI-compatible
+		}
+
+		genericProvider := llm.NewGenericProvider(llm.GenericConfig{
+			Name:    "custom-llm",
+			Model:   cfg.Model, // Передаём модель из конфигурации
+			BaseURL: cfg.BaseURL,
+			APIKey:  cfg.ApiKey,
+			Format:  format,
+		})
+
+		// Создаём пустой genkitApp для flows (можно оптимизировать позже)
+		genkitApp := genkit.Init(ctx)
+
+		analyzer, err = newSecurityAnalyzerWithProvider(genkitApp, cfg.Model, genericProvider, wsHub)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create Generic analyzer: %w", err)
+		}
+		log.Printf("✅ Используется Generic провайдер: %s (модель: %s, формат: %s)", cfg.BaseURL, cfg.Model, cfg.Format)
+
+	default:
+		return nil, fmt.Errorf("unknown LLM provider: %s", cfg.Provider)
 	}
 
 	burpIntegration := NewBurpIntegration(cfg.BurpHost, cfg.BurpPort)

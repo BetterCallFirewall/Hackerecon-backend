@@ -27,7 +27,7 @@ var urlRegexes = []*regexp.Regexp{
 // GenkitSecurityAnalyzer анализатор с использованием Genkit
 type GenkitSecurityAnalyzer struct {
 	model             string
-	WsHub             *websocket.Hub
+	WsHub             *websocket.WebsocketManager
 	genkitApp         *genkit.Genkit
 	mutex             sync.RWMutex
 	reports           []models.VulnerabilityReport
@@ -39,7 +39,7 @@ type GenkitSecurityAnalyzer struct {
 	contextMutex sync.RWMutex
 }
 
-func newGenkitSecurityAnalyzer(genkitApp *genkit.Genkit, model string, wsHub *websocket.Hub) (
+func newGenkitSecurityAnalyzer(genkitApp *genkit.Genkit, model string, wsHub *websocket.WebsocketManager) (
 	*GenkitSecurityAnalyzer, error,
 ) {
 	analyzer := &GenkitSecurityAnalyzer{

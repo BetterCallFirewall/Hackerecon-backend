@@ -14,9 +14,7 @@ func main() {
 		log.Fatalf("Failed to load config: %v", err)
 	}
 
-	wsHub := websocket.NewHub()
-
-	go wsHub.Run()
+	wsHub := websocket.NewWebsocketManager()
 
 	genkitProxy, err := driven.NewSecurityProxyWithGenkit(cfg.LLM, wsHub)
 	if err != nil {

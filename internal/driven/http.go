@@ -27,7 +27,9 @@ type SecurityProxyWithGenkit struct {
 	fallbackMode    bool
 }
 
-func NewSecurityProxyWithGenkit(cfg config.LLMConfig, wsHub *websocket.Hub) (*SecurityProxyWithGenkit, error) {
+func NewSecurityProxyWithGenkit(cfg config.LLMConfig, wsHub *websocket.WebsocketManager) (
+	*SecurityProxyWithGenkit, error,
+) {
 	ctx := context.Background()
 
 	// Инициализируем Genkit с плагинами

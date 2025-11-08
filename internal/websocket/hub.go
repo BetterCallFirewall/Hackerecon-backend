@@ -45,7 +45,6 @@ func (m *WebsocketManager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Получаем эксклюзивную блокировку для смены соединения.
 	m.connMutex.Lock()
 	// Если уже было старое соединение, закрываем его.
-	// Это ГЛАВНОЕ ИЗМЕНЕНИЕ. Мы закрываем его здесь, а не в readPump.
 	if m.activeConn != nil {
 		log.Println("Closing previous WebSocket connection to establish a new one.")
 		m.activeConn.Close()
@@ -55,7 +54,6 @@ func (m *WebsocketManager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	log.Println("New WebSocket client connected.")
 	m.connMutex.Unlock()
 
-	// Важно: Запускаем pump-функции ПОСЛЕ того, как соединение было установлено.
 	// Мы передаем управление жизненным циклом соединения этим двум горутинам.
 	go m.writePump(conn)
 	m.readPump(conn) // Запускаем readPump в текущей горутине, чтобы ServeHTTP не завершился.
@@ -63,7 +61,6 @@ func (m *WebsocketManager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // Broadcast отправляет данные активному клиенту.
 func (m *WebsocketManager) Broadcast(data interface{}) {
-	// ... (этот метод остается без изменений) ...
 	jsonData, err := json.Marshal(data)
 	if err != nil {
 		log.Printf("Failed to marshal message: %v", err)

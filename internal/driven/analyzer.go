@@ -40,29 +40,15 @@ type GenkitSecurityAnalyzer struct {
 	contextMutex sync.RWMutex
 }
 
+// newGenkitSecurityAnalyzer создаёт анализатор с Gemini (без кастомного провайдера)
 func newGenkitSecurityAnalyzer(genkitApp *genkit.Genkit, model string, wsHub *websocket.WebsocketManager) (
 	*GenkitSecurityAnalyzer, error,
 ) {
-	analyzer := &GenkitSecurityAnalyzer{
-		model:          model,
-		WsHub:          wsHub,
-		genkitApp:      genkitApp,
-		reports:        make([]models.VulnerabilityReport, 0),
-		secretPatterns: createSecretRegexPatterns(),
-		siteContexts:   make(map[string]*models.SiteContext),
-	}
-	// Определяем основной flow для анализа безопасности
-	analyzer.analysisFlow = genkit.DefineFlow(
-		genkitApp, "securityAnalysisFlow",
-		func(ctx context.Context, req *models.SecurityAnalysisRequest) (*models.SecurityAnalysisResponse, error) {
-			return analyzer.performSecurityAnalysis(ctx, req)
-		},
-	)
-
-	return analyzer, nil
+	return newSecurityAnalyzerWithProvider(genkitApp, model, nil, wsHub)
 }
 
-// newSecurityAnalyzerWithProvider создаёт анализатор с кастомным LLM провайдером
+// newSecurityAnalyzerWithProvider создаёт анализатор с опциональным кастомным LLM провайдером
+// Если provider == nil, используется Gemini через Genkit
 func newSecurityAnalyzerWithProvider(
 	genkitApp *genkit.Genkit,
 	model string,
@@ -79,7 +65,7 @@ func newSecurityAnalyzerWithProvider(
 		siteContexts:   make(map[string]*models.SiteContext),
 	}
 
-	// Определяем flows (они будут использовать llmProvider)
+	// Определяем flow для анализа безопасности
 	analyzer.analysisFlow = genkit.DefineFlow(
 		genkitApp, "securityAnalysisFlow",
 		func(ctx context.Context, req *models.SecurityAnalysisRequest) (*models.SecurityAnalysisResponse, error) {
@@ -119,6 +105,16 @@ func (analyzer *GenkitSecurityAnalyzer) performSecurityAnalysis(
 
 	// Устанавливаем timestamp и URL
 	result.Timestamp = time.Now()
+
+	// Нормализуем risk_level к lowercase (на случай если LLM вернул "Low" вместо "low")
+	result.RiskLevel = strings.ToLower(strings.TrimSpace(result.RiskLevel))
+
+	// Валидируем risk_level
+	validRiskLevels := map[string]bool{"low": true, "medium": true, "high": true, "critical": true}
+	if !validRiskLevels[result.RiskLevel] {
+		log.Printf("⚠️ Невалидный risk_level '%s', устанавливаем 'low'", result.RiskLevel)
+		result.RiskLevel = "low"
+	}
 
 	// Дополняем результат извлеченными секретами
 	result.ExtractedSecrets = append(result.ExtractedSecrets, req.ExtractedData.APIKeys...)

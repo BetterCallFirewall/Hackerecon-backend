@@ -52,9 +52,11 @@ func BuildSecurityAnalysisPrompt(req *models.SecurityAnalysisRequest) string {
 
 4.  **ИТОГОВЫЙ ВЕРДИКТ (Строго в формате JSON):**
     *   Заполни все поля JSON-схемы, включая 'has_vulnerability', 'risk_level', 'ai_comment' (с объяснением твоих рассуждений), 'recommendations'.
+    *   **ВАЖНО**: Поле 'risk_level' ДОЛЖНО быть СТРОГО одним из значений: "low", "medium", "high", "critical" (только маленькими буквами).
     *   **ВАЖНО для 'security_checklist'**: Если найдена уязвимость, предложи 3-5 разных способов её проверить/воспроизвести. Каждая проверка независима от других. Формат:
         "security_checklist": [{"action": "Подмена user_id", "description": "Замени user_id=123 на user_id=456 в запросе", "expected": "Сервер должен вернуть 403 Forbidden"}]
     *   Включи в ответ новые поля 'identified_user_role' и 'identified_data_objects'.
+	*   **ВАЖНО**: поля ai_comment, action, description должны быть на русском языке.
 
 В первую очередь сосредоточься на анализе бизнес-логики и поиске уязвимостей, связанных с обходом бизнес-правил.
 Также понижай уровень риска уязвимостей, для которых необходимо подбирать ключи.

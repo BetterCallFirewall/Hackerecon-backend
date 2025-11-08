@@ -130,6 +130,16 @@ func (p *GenericProvider) GenerateSecurityAnalysis(
 		result.SecurityChecklist = []models.SecurityCheckItem{}
 	}
 
+	// Нормализуем risk_level к lowercase (на случай если LLM вернул "Low" вместо "low")
+	result.RiskLevel = strings.ToLower(strings.TrimSpace(result.RiskLevel))
+
+	// Валидируем risk_level
+	validRiskLevels := map[string]bool{"low": true, "medium": true, "high": true, "critical": true}
+	if !validRiskLevels[result.RiskLevel] {
+		fmt.Printf("⚠️ Невалидный risk_level '%s', устанавливаем 'low'\n", result.RiskLevel)
+		result.RiskLevel = "low"
+	}
+
 	// Устанавливаем дополнительные поля
 	result.Timestamp = time.Now()
 	result.ExtractedSecrets = append(result.ExtractedSecrets, req.ExtractedData.APIKeys...)

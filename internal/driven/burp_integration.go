@@ -107,6 +107,7 @@ func (bi *BurpIntegration) checkBurpHealth() bool {
 
 	log.Printf("🔍 Проверка подключения к Burp Suite %s:%s...", bi.host, bi.port)
 
+	// Проверяем доступность через TCP connect (быстро и надежно)
 	conn, err := net.DialTimeout("tcp", bi.host+":"+bi.port, 5*time.Second)
 	if err != nil {
 		log.Printf("❌ Burp Suite недоступен: %v", err)
@@ -114,17 +115,6 @@ func (bi *BurpIntegration) checkBurpHealth() bool {
 		return false
 	}
 	conn.Close()
-
-	// Дополнительная проверка через HTTP запрос
-	testReq, _ := http.NewRequest("GET", "http://httpbin.org/get", nil)
-	testReq.Header.Set("User-Agent", "SecurityProxy-HealthCheck")
-
-	resp, err := bi.client.Do(testReq)
-	if err != nil {
-		log.Printf("⚠️ Burp доступен, но HTTP запросы не проходят: %v", err)
-		return false
-	}
-	resp.Body.Close()
 
 	log.Printf("✅ Burp Suite подключен успешно")
 	return true

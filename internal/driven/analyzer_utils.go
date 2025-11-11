@@ -56,7 +56,6 @@ func (analyzer *GenkitSecurityAnalyzer) buildSecurityAnalysisPrompt(req *models.
 4.  **ИТОГОВЫЙ ВЕРДИКТ (Строго в формате JSON):**
     *   Заполни все поля JSON-схемы, включая 'has_vulnerability'', 'risk_level'', 'ai_comment'' (с объяснением твоих рассуждений), 'recommendations'' и 'security_checklist''.
     *   Включи в ответ новые поля 'identified_user_role'' и 'identified_data_objects''.
-    *   **ВАЖНО**: Поле 'risk_level' ДОЛЖНО быть СТРОГО одним из значений: "low", "medium", "high", "critical" (только маленькими буквами).
 
 В первую очередь сосредоточься на анализе бизнес-логики и поиске уязвимостей, связанных с обходом бизнес-правил.
 Также понижай уровень риска уязвимостей, для которых необходимо подбирать ключи.

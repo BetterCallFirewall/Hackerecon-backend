@@ -68,7 +68,7 @@ func NewSecurityProxyWithGenkit(cfg config.LLMConfig, wsHub *websocket.Websocket
 		genericProvider := llm.NewGenericProvider(
 			llm.GenericConfig{
 				Name:    "custom-llm",
-				Model:   cfg.Model, // Передаём модель из конфигурации
+				Model:   cfg.Model, // Передассссвлрасапвреуушмгшаеосрпмлипргскатём модель из конфигурации
 				BaseURL: cfg.BaseURL,
 				APIKey:  cfg.ApiKey,
 				Format:  format,

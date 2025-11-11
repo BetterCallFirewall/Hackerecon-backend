@@ -14,12 +14,20 @@ type Config struct {
 }
 
 type LLMConfig struct {
+	// Общие настройки
+	Provider string `yaml:"provider"` // "gemini" или "generic"
 	Model    string `yaml:"model"`
+	ApiKey   string `yaml:"apiKey"`
+
+	// Для Generic провайдера
+	BaseURL string `yaml:"baseUrl"` // Базовый URL API
+	Format  string `yaml:"format"`  // "openai", "ollama", "raw"
+
+	// Старые поля (для совместимости)
 	URL      string `yaml:"url"`
 	Port     string `yaml:"port"`
 	BurpHost string `yaml:"burpHost"`
 	BurpPort string `yaml:"burpPort"`
-	ApiKey   string `yaml:"apiKey"`
 }
 
 type ProxyConfig struct {
@@ -32,6 +40,13 @@ type WebConfig struct {
 
 type CertConfig struct {
 	CertFile string `yaml:"cert_file"`
+}
+
+func getEnvOrDefault(key, defaultValue string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return defaultValue
 }
 
 func Load() (*Config, error) {
@@ -50,12 +65,17 @@ func Load() (*Config, error) {
 			CertFile: os.Getenv("PROXY_CERT_FILE"),
 		},
 		LLM: LLMConfig{
+			Provider: getEnvOrDefault("LLM_PROVIDER", "gemini"), // Default: gemini
 			Model:    os.Getenv("LLM_MODEL"),
+			ApiKey:   os.Getenv("API_KEY"),
+			BaseURL:  os.Getenv("LLM_BASE_URL"),
+			Format:   getEnvOrDefault("LLM_FORMAT", "openai"),
+
+			// Старые поля
 			URL:      os.Getenv("LLM_URL"),
 			Port:     os.Getenv("PORT"),
 			BurpHost: os.Getenv("BURP_HOST"),
 			BurpPort: os.Getenv("BURP_PORT"),
-			ApiKey:   os.Getenv("API_KEY"),
 		},
 	}, nil
 }

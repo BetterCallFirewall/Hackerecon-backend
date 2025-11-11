@@ -6,39 +6,32 @@ import (
 
 // VulnerabilityReport полный отчет о уязвимости
 type VulnerabilityReport struct {
-	ID               string                   `json:"id" jsonschema:"description=Unique report ID"`
-	Timestamp        time.Time                `json:"timestamp" jsonschema:"description=Report timestamp"`
-	SourceProxy      string                   `json:"source_proxy" jsonschema:"description=Source proxy (Go/Burp)"`
-	AnalysisResult   SecurityAnalysisResponse `json:"analysis_result" jsonschema:"description=LLM analysis result"`
-	ProcessingTime   time.Duration            `json:"processing_time" jsonschema:"description=Time taken for analysis"`
-	ModelUsed        string                   `json:"model_used" jsonschema:"description=AI model used for analysis"`
-	ValidationStatus string                   `json:"validation_status" jsonschema:"description=Manual validation status"`
+	ID             string                   `json:"id" jsonschema:"description=Unique report ID"`
+	Timestamp      time.Time                `json:"timestamp" jsonschema:"description=Report timestamp"`
+	AnalysisResult SecurityAnalysisResponse `json:"analysis_result" jsonschema:"description=LLM analysis result"`
+	ProcessingTime time.Duration            `json:"-" jsonschema:"description=Time taken for analysis"`
 }
 
 // SecurityAnalysisResponse структурированный ответ от LLM
 type SecurityAnalysisResponse struct {
-	URL                string              `json:"url" jsonschema:"description=Analyzed URL"`
-	HasVulnerability   bool                `json:"has_vulnerability" jsonschema:"description=True if vulnerability found"`
+	HasVulnerability   bool                `json:"has_vulnerability" jsonschema:"description=Indicates if a vulnerability was found"`
 	RiskLevel          string              `json:"risk_level" jsonschema:"enum=low,enum=medium,enum=high,enum=critical,description=Risk level assessment"`
 	AIComment          string              `json:"ai_comment" jsonschema:"description=AI analysis comment and explanation"`
-	SecurityChecklist  []SecurityCheckItem `json:"security_checklist" jsonschema:"description=Minimal security checklist for manual verification"`
-	VulnerabilityTypes []string            `json:"vulnerability_types" jsonschema:"description=List of detected vulnerability types"`
-	ConfidenceScore    float64             `json:"confidence_score" jsonschema:"description=Confidence in analysis (0.0-1.0)"`
-	Recommendations    []string            `json:"recommendations" jsonschema:"description=Actionable security recommendations"`
-	ExtractedSecrets   []ExtractedSecret   `json:"extracted_secrets" jsonschema:"description=Found secrets and sensitive data"`
+	SecurityChecklist  []SecurityCheckItem `json:"security_checklist,omitempty" jsonschema:"description=Manual verification checklist for found vulnerabilities"`
+	VulnerabilityTypes []string            `json:"vulnerability_types,omitempty" jsonschema:"description=List of detected vulnerability types"`
+	ConfidenceScore    float64             `json:"confidence_score,omitempty" jsonschema:"description=Confidence in analysis (0.0-1.0)"`
+	ExtractedSecrets   []ExtractedSecret   `json:"extracted_secrets,omitempty" jsonschema:"description=Found secrets and sensitive data"`
 	Timestamp          time.Time           `json:"timestamp" jsonschema:"description=Analysis timestamp"`
 
 	IdentifiedUserRole    string       `json:"identified_user_role,omitempty" jsonschema:"description=The user role identified in this request (e.g., 'guest', 'user', 'admin')"`
-	IdentifiedDataObjects []DataObject `json:"identified_data_objects,omitempty" jsonschema:"description=Data objects and their fields found in the request/response"`
+	IdentifiedDataObjects []DataObject `json:"-" jsonschema:"description=Data objects and their fields found in the request/response"`
 }
 
-// SecurityCheckItem элемент чеклиста для ручной проверки
+// SecurityCheckItem - элемент чеклиста для ручной проверки уязвимости
 type SecurityCheckItem struct {
-	CheckName      string `json:"check_name" jsonschema:"description=Name of the security check"`
-	Description    string `json:"description" jsonschema:"description=What to check manually"`
-	Priority       string `json:"priority" jsonschema:"enum=low,enum=medium,enum=high,enum=critical,description=Check priority"`
-	Instructions   string `json:"instructions" jsonschema:"description=Step-by-step instructions for manual verification"`
-	ExpectedResult string `json:"expected_result" jsonschema:"description=What the secure result should look like"`
+	Action      string `json:"action" jsonschema:"description=Test action to verify the vulnerability"`
+	Description string `json:"description" jsonschema:"description=What to check and why"`
+	Expected    string `json:"expected" jsonschema:"description=Expected secure behavior if properly protected"`
 }
 
 // ExtractedSecret найденный секрет или чувствительные данные

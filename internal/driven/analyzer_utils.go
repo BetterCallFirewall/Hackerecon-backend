@@ -209,14 +209,6 @@ func copyHeaders(dst, src http.Header) {
 	}
 }
 
-func copyHeader(dst, src http.Header) {
-	for k, vv := range src {
-		for _, v := range vv {
-			dst.Add(k, v)
-		}
-	}
-}
-
 func convertHeaders(h http.Header) map[string]string {
 	headers := make(map[string]string)
 	for k, v := range h {

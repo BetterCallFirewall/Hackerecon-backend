@@ -20,7 +20,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to initialize genkit proxy: %v", err)
 	}
-	go startGenkitReportServer(genkitProxy.Analyzer)
+
+	// Запускаем API сервер в отдельной горутине
+	go StartAPIServer(genkitProxy.Analyzer)
 
 	log.Fatal(genkitProxy.Start())
 }

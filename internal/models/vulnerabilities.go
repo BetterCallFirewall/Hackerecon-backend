@@ -71,3 +71,37 @@ type DataObject struct {
 	Name   string   `json:"name" jsonschema:"description=The name of the data object (e.g., 'user', 'order')"`
 	Fields []string `json:"fields" jsonschema:"description=A list of fields found for this object (e.g., ['id', 'email', 'role'])"`
 }
+
+// Новые структуры для двухэтапного анализа
+
+// URLAnalysisRequest запрос для быстрой оценки URL
+type URLAnalysisRequest struct {
+	NormalizedURL string            `json:"normalized_url" jsonschema:"description=Normalized URL pattern"`
+	Method        string            `json:"method" jsonschema:"description=HTTP method"`
+	Headers       map[string]string `json:"headers" jsonschema:"description=HTTP headers"`
+	ResponseBody  string            `json:"response_body" jsonschema:"description=Response body content"`
+	ContentType   string            `json:"content_type" jsonschema:"description=Response content type"`
+	SiteContext   *SiteContext      `json:"site_context" jsonschema:"description=Current site context"`
+}
+
+// URLAnalysisResponse ответ быстрой оценки URL
+type URLAnalysisResponse struct {
+	URLNote       *URLNote `json:"url_note" jsonschema:"description=AI-generated note about this URL"`
+	ShouldAnalyze bool     `json:"should_analyze" jsonschema:"description=Whether this URL deserves full security analysis"`
+	Priority      string   `json:"priority" jsonschema:"enum=low,enum=medium,enum=high,description=Analysis priority"`
+}
+
+// HypothesisRequest запрос для генерации гипотезы
+type HypothesisRequest struct {
+	SiteContext         *SiteContext        `json:"site_context" jsonschema:"description=Current site context"`
+	SuspiciousPatterns  []*URLPattern       `json:"suspicious_patterns" jsonschema:"description=Suspicious URL patterns"`
+	AttackSequences     [][]*URLPattern     `json:"attack_sequences" jsonschema:"description=Potential attack sequences"`
+	TechVulnerabilities []string            `json:"tech_vulnerabilities" jsonschema:"description=Known vulnerabilities in detected tech"`
+	PreviousHypothesis  *SecurityHypothesis `json:"previous_hypothesis,omitempty" jsonschema:"description=Previous hypothesis for comparison"`
+}
+
+// HypothesisResponse ответ с генерированной гипотезой
+type HypothesisResponse struct {
+	Hypothesis *SecurityHypothesis `json:"hypothesis" jsonschema:"description=Generated security hypothesis"`
+	Reasoning  string              `json:"reasoning" jsonschema:"description=AI reasoning behind the hypothesis"`
+}

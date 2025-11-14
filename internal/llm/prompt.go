@@ -3,6 +3,7 @@ package llm
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/BetterCallFirewall/Hackerecon/internal/models"
 )
@@ -81,4 +82,231 @@ func TruncateString(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "..."
+}
+
+// BuildURLAnalysisPrompt создает промпт для быстрой оценки URL
+func BuildURLAnalysisPrompt(req *models.URLAnalysisRequest) string {
+	return fmt.Sprintf(`
+Ты - эксперт по веб-безопасности. Быстро оцени этот URL эндпоинт.
+
+### ЗАПРОС:
+URL: %s %s
+Content-Type: %s
+Размер ответа: %d байт
+
+### КОНТЕКСТ САЙТА:
+Хост: %s
+Роли: %v
+Технологии: %s
+Найдено эндпоинтов: %d
+
+### ЗАДАЧА:
+Определи, заслуживает ли этот эндпоинт полного анализа безопасности.
+
+КРИТЕРИИ ОЦЕНКИ:
+1. Содержит бизнес-логику (авторизация, данные, платежи)
+2. Может содержать уязвимости
+3. Не является статикой или аналитикой
+4. Имеет интересный response контент
+
+ОТВЕТ СТРОГО В JSON:
+{
+    "url_note": {
+        "content": "Краткое описание назначения эндпоинта (2-3 слова)",
+        "suspicious": false,
+        "vuln_hint": "Подозрение на уязвимость, если есть",
+        "confidence": 0.9,
+        "context": "Дополнительный контекст (роль пользователя, тип данных)"
+    },
+    "should_analyze": true,
+    "priority": "high"
+}
+
+ВАЖНО:
+- should_analyze: true/false - нужен ли полный анализ
+- priority: "low", "medium", "high" - приоритет анализа
+- Все текстовые поля на русском языке
+`,
+		req.Method,
+		req.NormalizedURL,
+		req.ContentType,
+		len(req.ResponseBody),
+		req.SiteContext.Host,
+		req.SiteContext.UserRoles,
+		formatTechStackCompact(req.SiteContext.TechStack),
+		len(req.SiteContext.URLPatterns),
+	)
+}
+
+// BuildFullSecurityAnalysisPrompt создает промпт для полного анализа (с заметкой)
+func BuildFullSecurityAnalysisPrompt(req *models.SecurityAnalysisRequest, urlNote *models.URLNote) string {
+	contextJson, _ := json.MarshalIndent(req.SiteContext, "", "  ")
+	extractedDataJson, _ := json.MarshalIndent(req.ExtractedData, "", "  ")
+
+	urlNoteJson, _ := json.MarshalIndent(urlNote, "", "  ")
+
+	return fmt.Sprintf(`
+ПОЛНЫЙ АНАЛИЗ БЕЗОПАСНОСТИ
+
+### ЗАМЕЧАНИЕ ПО URL:
+%s
+
+### КОНТЕКСТ СЕССИИ ДЛЯ ХОСТА %s:
+%s
+
+### ТЕКУЩИЙ HTTP-ОБМЕН:
+- URL: %s
+- Метод: %s
+- Заголовки: %v
+- Тело запроса: %s
+- Тело ответа: %s
+- Content-Type: %s
+
+### ИЗВЛЕЧЕННЫЕ ДАННЫЕ:
+%s
+
+### ЗАДАЧИ:
+
+1. **АНАЛИЗ С УЧЕТОМ ЗАМЕТКИ:**
+   - Используй заметку о назначении URL для фокусировки анализа
+   - Проверь именно те уязвимости, которые актуальны для этого типа эндпоинта
+
+2. **БИЗНЕС-ЛОГИКА:**
+   - Проверь на IDOR, Broken Access Control, Race Conditions
+   - Проанализируй соответствие роли пользователя и прав доступа
+
+3. **ТЕХНИЧЕСКИЕ УЯЗВИМОСТИ:**
+   - SQLi, XSS, CSRF, Command Injection
+   - Отсутствие заголовков безопасности
+
+4. **ИТОГОВЫЙ ВЕРДИКТ (JSON):**
+   - Заполни все поля согласно схеме
+   - Учитывай заметку о подозрительной активности
+   - ai_comment на русском языке
+
+Ответ строго в JSON формате.
+`,
+		string(urlNoteJson),
+		req.SiteContext.Host,
+		string(contextJson),
+		req.URL,
+		req.Method,
+		req.Headers,
+		TruncateString(req.RequestBody, 500),
+		TruncateString(req.ResponseBody, 1000),
+		req.ContentType,
+		string(extractedDataJson),
+	)
+}
+
+// BuildHypothesisPrompt создает промпт для генерации гипотезы
+func BuildHypothesisPrompt(req *models.HypothesisRequest) string {
+	contextJson, _ := json.MarshalIndent(req.SiteContext, "", "  ")
+	suspiciousJson, _ := json.MarshalIndent(req.SuspiciousPatterns, "", "  ")
+	attackSequencesJson, _ := json.MarshalIndent(req.AttackSequences, "", "  ")
+
+	previousHypothesisText := "Нет предыдущей гипотезы"
+	if req.PreviousHypothesis != nil {
+		phJson, _ := json.MarshalIndent(req.PreviousHypothesis, "", "  ")
+		previousHypothesisText = string(phJson)
+	}
+
+	return fmt.Sprintf(`
+ГЕНЕРАЦИЯ ГЛАВНОЙ ГИПОТЕЗЫ УЯЗВИМОСТИ
+
+### КОНТЕКСТ САЙТА:
+%s
+
+### ПОДОЗРИТЕЛЬНЫЕ ПАТТЕРНЫ URL:
+%s
+
+### ВОЗМОЖНЫЕ ПОСЛЕДОВАТЕЛЬНОСТИ АТАК:
+%s
+
+### ИЗВЕСТНЫЕ УЯЗВИМОСТИ ТЕХНОЛОГИЙ:
+%v
+
+### ПРЕДЫДУЩАЯ ГИПОТЕЗА:
+%s
+
+### ЗАДАЧА:
+Сформируй наиболее вероятную гипотезу об уязвимости или определи URL для дополнительного исследования.
+
+АНАЛИЗ:
+1. Найди связи между подозрительными эндпоинтами
+2. Определи возможные векторы атак
+3. Учитывай обнаруженный стек технологий
+4. Сравни с предыдущей гипотезой (если есть)
+
+ОТВЕТ СТРОГО В JSON:
+{
+    "hypothesis": {
+        "id": "уникальный_id",
+        "title": "Краткое название гипотезы",
+        "description": "Подробное описание гипотезы",
+        "attack_vector": "Privilege Escalation",
+        "target_urls": ["/api/v1/admin/users", "/api/v1/orders"],
+        "attack_sequence": [
+            {
+                "step": 1,
+                "action": "Действие 1",
+                "description": "Описание шага 1",
+                "expected": "Ожидаемый результат"
+            }
+        ],
+        "required_role": "user",
+        "prereqs": ["аутентификация"],
+        "confidence": 0.8,
+        "impact": "high",
+        "effort": "low",
+        "status": "active"
+    },
+    "reasoning": "Объяснение логики построения гипотезы"
+}
+
+Все текстовые поля на русском языке.
+`,
+		string(contextJson),
+		string(suspiciousJson),
+		string(attackSequencesJson),
+		req.TechVulnerabilities,
+		previousHypothesisText,
+	)
+}
+
+// Вспомогательные функции
+
+func formatTechStackCompact(techStack *models.TechStack) string {
+	if techStack == nil {
+		return "не определен"
+	}
+
+	var technologies []string
+
+	if len(techStack.Frontend) > 0 {
+		for _, tech := range techStack.Frontend {
+			technologies = append(technologies, tech.Name)
+		}
+	}
+	if len(techStack.Backend) > 0 {
+		for _, tech := range techStack.Backend {
+			technologies = append(technologies, tech.Name)
+		}
+	}
+	if len(techStack.Database) > 0 {
+		for _, tech := range techStack.Database {
+			technologies = append(technologies, tech.Name)
+		}
+	}
+
+	if len(technologies) == 0 {
+		return "не определен"
+	}
+
+	// Возвращаем первые 5 технологий
+	if len(technologies) > 5 {
+		technologies = technologies[:5]
+	}
+
+	return strings.Join(technologies, ", ")
 }

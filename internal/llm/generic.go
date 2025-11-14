@@ -282,6 +282,128 @@ func (p *GenericProvider) parseResponse(body []byte) (string, error) {
 	}
 }
 
+// GenerateURLAnalysis выполняет быструю оценку URL через HTTP API
+func (p *GenericProvider) GenerateURLAnalysis(
+	ctx context.Context,
+	req *models.URLAnalysisRequest,
+) (*models.URLAnalysisResponse, error) {
+	// Строим промпт
+	prompt := BuildURLAnalysisPrompt(req)
+
+	// Формируем HTTP запрос
+	httpReq, err := p.buildHTTPRequest(ctx, prompt)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build request: %w", err)
+	}
+
+	// Отправляем запрос
+	httpResp, err := p.client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer httpResp.Body.Close()
+
+	// Читаем ответ
+	body, err := io.ReadAll(httpResp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if httpResp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("API returned status %d: %s", httpResp.StatusCode, string(body))
+	}
+
+	// Парсим ответ
+	content, err := p.parseResponse(body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	// Очищаем JSON
+	content = cleanJSONResponse(content)
+
+	// Парсим в структуру
+	var result models.URLAnalysisResponse
+	if err := json.Unmarshal([]byte(content), &result); err != nil {
+		return nil, fmt.Errorf("invalid JSON response: %w\nContent: %s", err, content)
+	}
+
+	// Валидация
+	if result.URLNote == nil {
+		result.URLNote = &models.URLNote{
+			Content:    "Analysis completed",
+			Suspicious: false,
+			Confidence: 0.5,
+		}
+	}
+	result.URLNote.Timestamp = time.Now()
+
+	return &result, nil
+}
+
+// GenerateHypothesis выполняет генерацию гипотезы через HTTP API
+func (p *GenericProvider) GenerateHypothesis(
+	ctx context.Context,
+	req *models.HypothesisRequest,
+) (*models.HypothesisResponse, error) {
+	// Строим промпт
+	prompt := BuildHypothesisPrompt(req)
+
+	// Формируем HTTP запрос
+	httpReq, err := p.buildHTTPRequest(ctx, prompt)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build request: %w", err)
+	}
+
+	// Отправляем запрос
+	httpResp, err := p.client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer httpResp.Body.Close()
+
+	// Читаем ответ
+	body, err := io.ReadAll(httpResp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if httpResp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("API returned status %d: %s", httpResp.StatusCode, string(body))
+	}
+
+	// Парсим ответ
+	content, err := p.parseResponse(body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	// Очищаем JSON
+	content = cleanJSONResponse(content)
+
+	// Парсим в структуру
+	var result models.HypothesisResponse
+	if err := json.Unmarshal([]byte(content), &result); err != nil {
+		return nil, fmt.Errorf("invalid JSON response: %w\nContent: %s", err, content)
+	}
+
+	// Валидация
+	if result.Hypothesis != nil {
+		now := time.Now()
+		if result.Hypothesis.CreatedAt.IsZero() {
+			result.Hypothesis.CreatedAt = now
+		}
+		if result.Hypothesis.UpdatedAt.IsZero() {
+			result.Hypothesis.UpdatedAt = now
+		}
+		if result.Hypothesis.ID == "" {
+			result.Hypothesis.ID = fmt.Sprintf("%d", time.Now().Unix())
+		}
+	}
+
+	return &result, nil
+}
+
 func (p *GenericProvider) GetName() string {
 	return p.name
 }

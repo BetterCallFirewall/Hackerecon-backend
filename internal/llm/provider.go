@@ -13,6 +13,14 @@ type Provider interface {
 	// Принимает запрос, возвращает структурированный ответ
 	GenerateSecurityAnalysis(ctx context.Context, req *models.SecurityAnalysisRequest) (*models.SecurityAnalysisResponse, error)
 
+	// GenerateURLAnalysis - быстрая оценка значимости URL
+	// Используется для оптимизации нагрузки на LLM
+	GenerateURLAnalysis(ctx context.Context, req *models.URLAnalysisRequest) (*models.URLAnalysisResponse, error)
+
+	// GenerateHypothesis - генерация главной гипотезы об уязвимости
+	// Анализирует накопленную информацию о сайте
+	GenerateHypothesis(ctx context.Context, req *models.HypothesisRequest) (*models.HypothesisResponse, error)
+
 	// GetName возвращает название провайдера (для логирования)
 	GetName() string
 

@@ -60,6 +60,74 @@ func (p *GeminiProvider) buildPrompt(req *models.SecurityAnalysisRequest) string
 	return BuildSecurityAnalysisPrompt(req)
 }
 
+// GenerateURLAnalysis выполняет быструю оценку URL через Genkit
+func (p *GeminiProvider) GenerateURLAnalysis(
+	ctx context.Context,
+	req *models.URLAnalysisRequest,
+) (*models.URLAnalysisResponse, error) {
+	// Строим промпт для быстрой оценки
+	prompt := BuildURLAnalysisPrompt(req)
+
+	// Используем Genkit для генерации структурированного ответа
+	result, _, err := genkit.GenerateData[models.URLAnalysisResponse](
+		ctx,
+		p.genkitApp,
+		ai.WithPrompt(prompt),
+	)
+
+	if err != nil {
+		return nil, fmt.Errorf("gemini URL analysis failed: %w", err)
+	}
+
+	// Валидация
+	if result.URLNote == nil {
+		result.URLNote = &models.URLNote{
+			Content:    "Analysis completed",
+			Suspicious: false,
+			Confidence: 0.5,
+		}
+	}
+	result.URLNote.Timestamp = time.Now()
+
+	return result, nil
+}
+
+// GenerateHypothesis выполняет генерацию гипотезы через Genkit
+func (p *GeminiProvider) GenerateHypothesis(
+	ctx context.Context,
+	req *models.HypothesisRequest,
+) (*models.HypothesisResponse, error) {
+	// Строим промпт для генерации гипотезы
+	prompt := BuildHypothesisPrompt(req)
+
+	// Используем Genkit для генерации структурированного ответа
+	result, _, err := genkit.GenerateData[models.HypothesisResponse](
+		ctx,
+		p.genkitApp,
+		ai.WithPrompt(prompt),
+	)
+
+	if err != nil {
+		return nil, fmt.Errorf("gemini hypothesis generation failed: %w", err)
+	}
+
+	// Валидация
+	if result.Hypothesis != nil {
+		now := time.Now()
+		if result.Hypothesis.CreatedAt.IsZero() {
+			result.Hypothesis.CreatedAt = now
+		}
+		if result.Hypothesis.UpdatedAt.IsZero() {
+			result.Hypothesis.UpdatedAt = now
+		}
+		if result.Hypothesis.ID == "" {
+			result.Hypothesis.ID = fmt.Sprintf("%d", time.Now().Unix())
+		}
+	}
+
+	return result, nil
+}
+
 func (p *GeminiProvider) GetName() string {
 	return "gemini"
 }

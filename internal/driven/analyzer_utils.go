@@ -88,71 +88,8 @@ func createSecretRegexPatterns() []*regexp.Regexp {
 	return patterns
 }
 
-func identifySecretType(match string) string {
-	lowerMatch := strings.ToLower(match)
-
-	typeMap := map[string]string{
-		"api":     "API Key",
-		"token":   "Access Token",
-		"secret":  "Secret Key",
-		"akia":    "AWS Access Key",
-		"aiza":    "Google API Key",
-		"ghp_":    "GitHub Token",
-		"sk_live": "Stripe Secret Key",
-		"eyj":     "JWT Token",
-	}
-
-	for pattern, secretType := range typeMap {
-		if strings.Contains(lowerMatch, pattern) {
-			return secretType
-		}
-	}
-
-	return "Unknown Secret"
-}
-
-func calculateSecretConfidence(secretType, value string) float64 {
-	confidence := 0.5
-
-	if strings.HasPrefix(value, "AKIA") || strings.HasPrefix(value, "AIza") {
-		confidence = 0.95
-	} else if strings.HasPrefix(value, "ghp_") || strings.HasPrefix(value, "sk_live_") {
-		confidence = 0.95
-	} else if len(value) > 32 && (strings.Contains(secretType, "API") || strings.Contains(secretType, "Secret")) {
-		confidence = 0.8
-	} else if len(value) > 16 {
-		confidence = 0.7
-	}
-
-	return confidence
-}
-
-func isSuspiciousFunction(funcName, context string) (bool, string) {
-	suspiciousFunctions := map[string]string{
-		"eval":        "Выполнение произвольного кода",
-		"settimeout":  "Потенциальное выполнение кода",
-		"setinterval": "Потенциальное выполнение кода",
-		"function":    "Динамическое создание функций",
-		"innerhtml":   "Возможность XSS",
-		"outerhtml":   "Возможность XSS",
-	}
-
-	lowerName := strings.ToLower(funcName)
-	if reason, exists := suspiciousFunctions[lowerName]; exists {
-		return true, reason
-	}
-
-	// Проверяем контекст
-	suspiciousPatterns := []string{"crypto", "encrypt", "decrypt", "hash", "password", "token", "secret"}
-	lowerContext := strings.ToLower(context)
-	for _, pattern := range suspiciousPatterns {
-		if strings.Contains(lowerContext, pattern) {
-			return true, fmt.Sprintf("Содержит подозрительный паттерн: %s", pattern)
-		}
-	}
-
-	return false, ""
-}
+// identifySecretType, calculateSecretConfidence и isSuspiciousFunction удалены
+// LLM теперь сам определяет типы секретов и подозрительность функций на основе контекста
 
 func truncateString(s string, maxLen int) string {
 	if len(s) <= maxLen {

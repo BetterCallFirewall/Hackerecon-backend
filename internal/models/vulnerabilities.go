@@ -95,7 +95,6 @@ type URLAnalysisResponse struct {
 type HypothesisRequest struct {
 	SiteContext         *SiteContext        `json:"site_context" jsonschema:"description=Current site context"`
 	SuspiciousPatterns  []*URLPattern       `json:"suspicious_patterns" jsonschema:"description=Suspicious URL patterns"`
-	AttackSequences     [][]*URLPattern     `json:"attack_sequences" jsonschema:"description=Potential attack sequences"`
 	TechVulnerabilities []string            `json:"tech_vulnerabilities" jsonschema:"description=Known vulnerabilities in detected tech"`
 	PreviousHypothesis  *SecurityHypothesis `json:"previous_hypothesis,omitempty" jsonschema:"description=Previous hypothesis for comparison"`
 }

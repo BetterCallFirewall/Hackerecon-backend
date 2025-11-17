@@ -14,9 +14,6 @@ type RequestFilter struct {
 	staticPaths          []string
 	contentTypeBlacklist []string
 
-	// Правила определения значимости
-	minResponseSize int
-
 	// Паттерны для определения бизнес-логики
 	businessLogicPatterns []string
 
@@ -36,7 +33,7 @@ func NewRequestFilter() *RequestFilter {
 		},
 		analyticsPaths: []string{
 			"/analytics", "/metrics", "/ga.js", "/gtag.js", "/pixel",
-			"/tracking", "/beacon", "/log", "/stats", "/counter",
+			"/tracking", "/beacon", "/stats", "/counter",
 		},
 		staticPaths: []string{
 			"/static/", "/assets/", "/public/", "/img/", "/images/", "/css/", "/js/",
@@ -47,7 +44,6 @@ func NewRequestFilter() *RequestFilter {
 			"image/", "video/", "audio/",
 			"font/", "application/font",
 		},
-		minResponseSize: 100,
 		businessLogicPatterns: []string{
 			"/api/", "/v1/", "/v2/", "/v3/", "/admin/", "/user/", "/users/",
 			"/profile/", "/order/", "/orders/", "/cart/", "/payment/", "/billing/",
@@ -61,14 +57,10 @@ func NewRequestFilter() *RequestFilter {
 	}
 }
 
-// ShouldSkipRequest определяет, нужно ли пропустить анализ этого запроса
-func (rf *RequestFilter) ShouldSkipRequest(req *http.Request, resp *http.Response, contentType string) bool {
-	shouldSkip, _ := rf.ShouldSkipRequestWithReason(req, resp, contentType)
-	return shouldSkip
-}
-
 // ShouldSkipRequestWithReason определяет, нужно ли пропустить анализ и возвращает причину
-func (rf *RequestFilter) ShouldSkipRequestWithReason(req *http.Request, resp *http.Response, contentType string) (bool, string) {
+func (rf *RequestFilter) ShouldSkipRequestWithReason(req *http.Request, resp *http.Response, contentType string) (
+	bool, string,
+) {
 	url := req.URL.String()
 
 	// Проверяем кэш
@@ -91,14 +83,10 @@ func (rf *RequestFilter) ShouldSkipRequestWithReason(req *http.Request, resp *ht
 	return shouldSkip, reason
 }
 
-// evaluateSkipRules применяет правила фильтрации
-func (rf *RequestFilter) evaluateSkipRules(req *http.Request, resp *http.Response, contentType string) bool {
-	shouldSkip, _ := rf.evaluateSkipRulesWithReason(req, resp, contentType)
-	return shouldSkip
-}
-
 // evaluateSkipRulesWithReason применяет правила фильтрации и возвращает причину
-func (rf *RequestFilter) evaluateSkipRulesWithReason(req *http.Request, resp *http.Response, contentType string) (bool, string) {
+func (rf *RequestFilter) evaluateSkipRulesWithReason(req *http.Request, resp *http.Response, contentType string) (
+	bool, string,
+) {
 	url := req.URL.String()
 	method := req.Method
 
@@ -127,14 +115,6 @@ func (rf *RequestFilter) evaluateSkipRulesWithReason(req *http.Request, resp *ht
 	for _, ct := range rf.contentTypeBlacklist {
 		if strings.Contains(contentType, ct) {
 			return true, "blacklisted content-type: " + ct
-		}
-	}
-
-	// 5. GET запросы с очень маленькими ответами (обычно статику или ошибки)
-	if method == "GET" && resp != nil && resp.ContentLength > 0 && resp.ContentLength < int64(rf.minResponseSize) {
-		// Проверяем что это не важный маленький ответ
-		if !rf.isImportantSmallResponse(url, resp.StatusCode) {
-			return true, "small GET response: " + string(resp.ContentLength) + " bytes"
 		}
 	}
 
@@ -189,31 +169,6 @@ func (rf *RequestFilter) isLikelyBusinessLogicEndpoint(url, method string) bool 
 
 	// API эндпоинты
 	if strings.Contains(url, "/api/") || strings.Contains(url, "/v1/") || strings.Contains(url, "/v2/") {
-		return true
-	}
-
-	return false
-}
-
-// isImportantSmallResponse проверяет важен ли маленький ответ
-func (rf *RequestFilter) isImportantSmallResponse(url string, statusCode int) bool {
-	// API ответы могут быть маленькими но важными
-	if strings.Contains(url, "/api/") || strings.Contains(url, "/v1/") {
-		return true
-	}
-
-	// Ответы аутентификации могут быть маленькими
-	if strings.Contains(url, "/auth/") || strings.Contains(url, "/login/") || strings.Contains(url, "/token") {
-		return true
-	}
-
-	// Статусы ошибок могут быть важны
-	if statusCode >= 400 && statusCode < 600 {
-		return true
-	}
-
-	// Перенаправления могут быть важны
-	if statusCode >= 300 && statusCode < 400 {
 		return true
 	}
 

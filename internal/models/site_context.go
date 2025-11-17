@@ -4,49 +4,35 @@ import "time"
 
 // SiteContext хранит накопленную информацию о целевом сайте.
 type SiteContext struct {
-	Host                string              `json:"host" jsonschema:"description=The target host/domain"`
-	DiscoveredEndpoints map[string]bool     `json:"discovered_endpoints" jsonschema:"description=Map of discovered endpoint URLs"`
-	DataObjects         map[string][]string `json:"data_objects" jsonschema:"description=Map of data objects and their fields"`
-	UserRoles           map[string]bool     `json:"user_roles" jsonschema:"description=Discovered user roles"`
-	AuthType            string              `json:"auth_type" jsonschema:"enum=Cookie,enum=JWT Bearer,enum=Unknown,description=Authentication type detected"`
-
-	// Новые поля для расширенного анализа
+	Host                 string                 `json:"host" jsonschema:"description=The target host/domain"`
 	URLPatterns          map[string]*URLPattern `json:"url_patterns" jsonschema:"description=Normalized URL patterns with AI notes"`
 	TechStack            *TechStack             `json:"tech_stack,omitempty" jsonschema:"description=Detected technology stack"`
 	MainHypothesis       *SecurityHypothesis    `json:"main_hypothesis,omitempty" jsonschema:"description=Main security hypothesis"`
 	LastHypothesisUpdate time.Time              `json:"last_hypothesis_update" jsonschema:"description=Last time hypothesis was updated"`
-
-	LastUpdated time.Time `json:"last_updated" jsonschema:"description=Last context update timestamp"`
+	LastUpdated          time.Time              `json:"last_updated" jsonschema:"description=Last context update timestamp"`
 }
 
 // NewSiteContext создает новый экземпляр контекста для сайта.
 func NewSiteContext(host string) *SiteContext {
 	return &SiteContext{
-		Host:                host,
-		DiscoveredEndpoints: make(map[string]bool),
-		DataObjects:         make(map[string][]string),
-		UserRoles:           make(map[string]bool),
-		AuthType:            "Unknown",
-		URLPatterns:         make(map[string]*URLPattern),
-		LastUpdated:         time.Now(),
+		Host:        host,
+		URLPatterns: make(map[string]*URLPattern),
+		LastUpdated: time.Now(),
 	}
 }
 
 // URLPattern представляет нормализованный паттерн URL с заметками
 type URLPattern struct {
-	Pattern  string   `json:"pattern" jsonschema:"description=Normalized URL pattern with placeholders"`
-	Method   string   `json:"method" jsonschema:"enum=GET,enum=POST,enum=PUT,enum=DELETE,enum=PATCH,enum=OPTIONS,enum=HEAD,description=HTTP method"`
-	Purpose  string   `json:"purpose" jsonschema:"description=Purpose of this endpoint (e.g., 'User profile viewing')"`
-	Examples []string `json:"examples" jsonschema:"description=Example URLs that match this pattern"`
+	Pattern string `json:"pattern" jsonschema:"description=Normalized URL pattern with placeholders"`
+	Method  string `json:"method" jsonschema:"enum=GET,enum=POST,enum=PUT,enum=DELETE,enum=PATCH,enum=OPTIONS,enum=HEAD,description=HTTP method"`
+	Purpose string `json:"purpose" jsonschema:"description=Purpose of this endpoint (e.g., 'User profile viewing')"`
 
-	Notes    []URLNote `json:"notes" jsonschema:"description=Historical notes about this URL pattern"`
+	Notes    []URLNote `json:"notes" jsonschema:"description=Historical notes about this URL pattern (max 100)"`
 	LastNote *URLNote  `json:"last_note,omitempty" jsonschema:"description=Most recent note about this pattern"`
 
-	FirstSeen      time.Time       `json:"first_seen" jsonschema:"description=When this pattern was first discovered"`
-	LastSeen       time.Time       `json:"last_seen" jsonschema:"description=When this pattern was last accessed"`
-	AccessCount    int             `json:"access_count" jsonschema:"description=How many times this pattern was accessed"`
-	UserRoles      []string        `json:"user_roles" jsonschema:"description=User roles that have accessed this pattern"`
-	RequestSamples []RequestSample `json:"request_samples" jsonschema:"description=Sample requests for analysis"`
+	FirstSeen   time.Time `json:"first_seen" jsonschema:"description=When this pattern was first discovered"`
+	LastSeen    time.Time `json:"last_seen" jsonschema:"description=When this pattern was last accessed"`
+	AccessCount int       `json:"access_count" jsonschema:"description=How many times this pattern was accessed"`
 }
 
 // URLNote содержит заметку LLM о URL
@@ -57,15 +43,6 @@ type URLNote struct {
 	VulnHint   string    `json:"vuln_hint,omitempty" jsonschema:"description=Hint about potential vulnerability"`
 	Confidence float64   `json:"confidence" jsonschema:"description=Confidence level (0.0-1.0)"`
 	Context    string    `json:"context,omitempty" jsonschema:"description=Additional context for the note"`
-}
-
-// RequestSample представляет пример запроса
-type RequestSample struct {
-	Timestamp   time.Time         `json:"timestamp" jsonschema:"description=Request timestamp"`
-	Method      string            `json:"method" jsonschema:"description=HTTP method"`
-	Headers     map[string]string `json:"headers" jsonschema:"description=Request headers"`
-	ContentType string            `json:"content_type" jsonschema:"description=Content-Type header"`
-	Response    int               `json:"response_code" jsonschema:"description=HTTP response code"`
 }
 
 // TechStack содержит информацию об обнаруженных технологиях

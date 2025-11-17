@@ -258,6 +258,9 @@ func (can *ContextAwareNormalizer) NormalizeWithContext(rawURL string) string {
 
 	// Обновляем статистику
 	can.patternCounts[normalized]++
+
+	// Сохраняем первый пример для обратной совместимости
+	// Теперь примеры хранятся в SiteContext.URLPatterns
 	if can.patternCounts[normalized] == 1 {
 		can.knownPatterns[normalized] = rawURL
 	}

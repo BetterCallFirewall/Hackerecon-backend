@@ -36,25 +36,12 @@ func NewAnalysisCache() *AnalysisCache {
 // Get возвращает кэшированный результат анализа
 func (c *AnalysisCache) Get(cacheKey string) *CachedAnalysis {
 	c.mutex.RLock()
+	defer c.mutex.RUnlock()
 
 	if cached, exists := c.cache[cacheKey]; exists {
 		// Проверяем не устарел ли кэш
 		if time.Since(cached.LastAnalyzed) < c.expiry {
-			c.mutex.RUnlock()
 			return cached
-		}
-	}
-
-	c.mutex.RUnlock()
-
-	// Если кэш устарел, удаляем его с полной блокировкой
-	c.mutex.Lock()
-	defer c.mutex.Unlock()
-
-	// Проверяем снова (другая горутина могла удалить)
-	if cached, exists := c.cache[cacheKey]; exists {
-		if time.Since(cached.LastAnalyzed) >= c.expiry {
-			delete(c.cache, cacheKey)
 		}
 	}
 

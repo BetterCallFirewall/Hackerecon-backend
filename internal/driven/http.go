@@ -194,7 +194,7 @@ func (ps *SecurityProxyWithGenkit) handleHTTP(w http.ResponseWriter, req *http.R
 		return
 	}
 
-	// Создаем новый запрос для отправки
+	// Клонируем запрос для отправки
 	outReq := createProxyRequest(req, body)
 
 	// Получаем HTTP клиента с учетом fallback логики
@@ -253,8 +253,13 @@ func createProxyRequest(inReq *http.Request, body []byte) *http.Request {
 
 	outReq.RequestURI = ""
 
-	// Копируем заголовки, исключая проблемные
-	copyHeaders(outReq.Header, inReq.Header)
+	// Клонируем заголовки
+	outReq.Header = inReq.Header.Clone()
+
+	// Удаляем проблемные заголовки
+	for _, h := range []string{"Connection", "Proxy-Connection", "Proxy-Authenticate", "Proxy-Authorization", "Te", "Trailers", "Upgrade"} {
+		outReq.Header.Del(h)
+	}
 
 	// Устанавливаем правильный Host заголовок
 	outReq.Host = inReq.Host
@@ -271,11 +276,8 @@ func (ps *SecurityProxyWithGenkit) analyzeTraffic(
 	req *http.Request, reqBody string, resp *http.Response, respBody string,
 ) {
 	contentType := resp.Header.Get("Content-Type")
-	if isSkippableContent(contentType, req.URL.Path) {
-		log.Printf("⚪️ Пропуск анализа для %s (Content-Type: %s)", req.URL.String(), contentType)
-		return
-	}
 
+	// Фильтрация выполняется в Analyzer через RequestFilter
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 

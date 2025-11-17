@@ -9,7 +9,6 @@ type VulnerabilityReport struct {
 	ID             string                   `json:"id" jsonschema:"description=Unique report ID"`
 	Timestamp      time.Time                `json:"timestamp" jsonschema:"description=Report timestamp"`
 	AnalysisResult SecurityAnalysisResponse `json:"analysis_result" jsonschema:"description=LLM analysis result"`
-	ProcessingTime time.Duration            `json:"-" jsonschema:"description=Time taken for analysis"`
 }
 
 // SecurityAnalysisResponse структурированный ответ от LLM
@@ -24,7 +23,7 @@ type SecurityAnalysisResponse struct {
 	Timestamp          time.Time           `json:"timestamp" jsonschema:"description=Analysis timestamp"`
 
 	IdentifiedUserRole    string       `json:"identified_user_role,omitempty" jsonschema:"description=The user role identified in this request (e.g., 'guest', 'user', 'admin')"`
-	IdentifiedDataObjects []DataObject `json:"-" jsonschema:"description=Data objects and their fields found in the request/response"`
+	IdentifiedDataObjects []DataObject `json:"identified_data_objects,omitempty" jsonschema:"description=Data objects and their fields found in the request/response"`
 }
 
 // SecurityCheckItem - элемент чеклиста для ручной проверки уязвимости

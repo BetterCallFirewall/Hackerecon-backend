@@ -190,37 +190,6 @@ func (g *HypothesisGenerator) updateSiteContextWithHypothesis(
 	siteContext.LastUpdated = time.Now()
 }
 
-// broadcastHypothesis отправляет уведомление о гипотезе в UI вместе с tech stack
-func (g *HypothesisGenerator) broadcastHypothesis(
-	resp *models.HypothesisResponse,
-	host string,
-	manual bool,
-) {
-	// Получаем tech stack из контекста
-	siteContext := g.contextManager.Get(host)
-	var techStack *models.TechStack
-	if siteContext != nil {
-		techStack = siteContext.TechStack
-	}
-
-	dto := models.HypothesisDTO{
-		Type:       "hypotesis",
-		Hypothesis: resp.Hypothesis,
-		TechStack:  techStack,
-	}
-
-	// Отправляем через WebSocket
-	g.wsHub.Broadcast(
-		map[string]interface{}{
-			"type":      "hypothesis_update",
-			"data":      dto,
-			"reasoning": resp.Reasoning,
-			"host":      host,
-			"manual":    manual,
-		},
-	)
-}
-
 // GetCurrent возвращает текущую гипотезу для хоста
 func (g *HypothesisGenerator) GetCurrent(host string) *models.SecurityHypothesis {
 	siteContext := g.contextManager.Get(host)

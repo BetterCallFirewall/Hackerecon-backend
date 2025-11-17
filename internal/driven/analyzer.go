@@ -19,12 +19,6 @@ import (
 	"github.com/google/uuid"
 )
 
-var urlRegexes = []*regexp.Regexp{
-	regexp.MustCompile(`https?://[a-zA-Z0-9\-._~:/?#[\]@!$&'()*+,;=%]+`),
-	regexp.MustCompile(`/api/[a-zA-Z0-9\-._~:/?#[\]@!$&'()*+,;=%]*`),
-	regexp.MustCompile(`/v[0-9]+/[a-zA-Z0-9\-._~:/?#[\]@!$&'()*+,;=%]*`),
-}
-
 // GenkitSecurityAnalyzer анализирует HTTP трафик на наличие уязвимостей безопасности
 // используя LLM модели через кастомный провайдер. Поддерживает двухэтапный анализ с кэшированием
 // и автоматическую генерацию гипотез об уязвимостях.
@@ -201,8 +195,10 @@ func (analyzer *GenkitSecurityAnalyzer) AnalyzeHTTPTraffic(
 	// 7. Кэшируем результат быстрой оценки
 	analyzer.cacheAnalysis(cacheKey, urlAnalysisResp)
 
-	// 8. Обновляем паттерн URL с заметками от LLM
-	analyzer.updateURLPattern(siteContext, normalizedURL, req.Method, urlAnalysisResp.URLNote)
+	// 8. Обновляем паттерн URL с заметками от LLM (если контекст существует)
+	if siteContext != nil {
+		analyzer.updateURLPattern(siteContext, normalizedURL, req.Method, urlAnalysisResp.URLNote)
+	}
 
 	// 9. Полный анализ только если нужно
 	if urlAnalysisResp.ShouldAnalyze {
@@ -277,9 +273,6 @@ func (analyzer *GenkitSecurityAnalyzer) fullSecurityAnalysis(
 		return fmt.Errorf("full security analysis failed: %w", err)
 	}
 
-	// Обновляем основной контекст
-	analyzer.updateSiteContext(req.URL.Host, req.URL.String(), result)
-
 	// Отправляем результат в WebSocket
 	analyzer.broadcastAnalysisResult(req, resp, result, reqBody, respBody)
 
@@ -301,15 +294,21 @@ func (analyzer *GenkitSecurityAnalyzer) broadcastAnalysisResult(
 
 	// Отправляем результат в WebSocket
 	analyzer.WsHub.Broadcast(
-		models.AnalysisResultDTO{
-			URL:            req.URL.String(),
-			Method:         req.Method,
-			StatusCode:     resp.StatusCode,
-			AnalysisResult: *result,
-			ReqHeaders:     convertHeaders(req.Header),
-			RespHeaders:    convertHeaders(resp.Header),
-			ReqBody:        truncateString(reqBody, maxContentSizeForLLM),
-			RespBody:       truncateString(respBody, maxContentSizeForLLM),
+		models.ReportDTO{
+			Report: models.VulnerabilityReport{
+				ID:             uuid.New().String(),
+				Timestamp:      time.Now(),
+				AnalysisResult: *result,
+			},
+			RequestResponse: models.RequestResponseInfo{
+				URL:         req.URL.String(),
+				Method:      req.Method,
+				StatusCode:  resp.StatusCode,
+				ReqHeaders:  convertHeaders(req.Header),
+				RespHeaders: convertHeaders(resp.Header),
+				ReqBody:     llm.TruncateString(reqBody, maxContentSizeForLLM),
+				RespBody:    llm.TruncateString(respBody, maxContentSizeForLLM),
+			},
 		},
 	)
 }
@@ -335,25 +334,17 @@ func (analyzer *GenkitSecurityAnalyzer) prepareContentForLLM(content, contentTyp
 			// Заменяем множественные пробелы и переносы строк на один пробел
 			re := regexp.MustCompile(`\s+`)
 			textContent = re.ReplaceAllString(textContent, " ")
-			return truncateString("HTML Text Content: "+textContent, 2000) // Ограничиваем до 2000 символов
+			return llm.TruncateString("HTML Text Content: "+textContent, 2000) // Ограничиваем до 2000 символов
 		}
 	}
 
 	// Для JavaScript и JSON просто обрезаем, т.к. их структура важна
 	if strings.Contains(contentType, "javascript") || strings.Contains(contentType, "json") {
-		return truncateString(content, 2000) // Ограничиваем до 2000 символов
+		return llm.TruncateString(content, 2000) // Ограничиваем до 2000 символов
 	}
 
 	// Для всего остального (например, text/plain) тоже обрезаем
-	return truncateString(content, 1000)
-}
-
-// updateSiteContext обновляет контекст на основе ответа от LLM
-func (analyzer *GenkitSecurityAnalyzer) updateSiteContext(
-	host string, url string,
-	llmResponse *models.SecurityAnalysisResponse,
-) {
-	analyzer.contextManager.UpdateFromAnalysis(host, url, llmResponse)
+	return llm.TruncateString(content, 1000)
 }
 
 // shouldExtractData проверяет, нужно ли извлекать данные (только для HTML/JS)

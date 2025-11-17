@@ -43,23 +43,6 @@ func (m *SiteContextManager) Get(host string) *models.SiteContext {
 	return m.contexts[host]
 }
 
-// UpdateFromAnalysis обновляет контекст на основе ответа от LLM
-func (m *SiteContextManager) UpdateFromAnalysis(
-	host string,
-	url string,
-	llmResponse *models.SecurityAnalysisResponse,
-) {
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
-
-	context, exists := m.contexts[host]
-	if !exists {
-		return
-	}
-
-	context.LastUpdated = time.Now()
-}
-
 // UpdateURLPattern обновляет паттерн URL с новой заметкой
 func (m *SiteContextManager) UpdateURLPattern(
 	siteContext *models.SiteContext,

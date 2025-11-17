@@ -65,8 +65,11 @@ func StartAPIServer(analyzer *driven.GenkitSecurityAnalyzer) {
 
 		// Формируем DTO с гипотезой и tech stack
 		dto := models.HypothesisDTO{
-			Hypothesis: hypothesisResp.Hypothesis,
-			TechStack:  techStack,
+			Type: "hypothesis",
+			Data: &models.HypothesisData{
+				Hypothesis: hypothesisResp.Hypothesis,
+				TechStack:  techStack,
+			},
 		}
 
 		json.NewEncoder(w).Encode(dto)

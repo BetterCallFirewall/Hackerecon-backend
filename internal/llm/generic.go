@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -113,10 +114,27 @@ func (p *GenericProvider) GenerateSecurityAnalysis(
 	// Очищаем JSON от возможного markdown
 	content = cleanJSONResponse(content)
 
+	// Нормализуем JSON: экранируем только неэкранированные спецсимволы
+	content = normalizeJSONString(content)
+
 	// Парсим JSON в нашу структуру
 	var result models.SecurityAnalysisResponse
-	if err := json.Unmarshal([]byte(content), &result); err != nil {
-		return nil, fmt.Errorf("invalid JSON response: %w\nContent: %s", err, content)
+
+	// Используем Decoder для более мягкого парсинга
+	decoder := json.NewDecoder(strings.NewReader(content))
+	if err := decoder.Decode(&result); err != nil {
+		// Если не получилось, пробуем через map для диагностики
+		var rawMap map[string]interface{}
+		if err2 := json.Unmarshal([]byte(content), &rawMap); err2 == nil {
+			// JSON валидный, но не соответствует структуре
+			log.Printf("⚠️ JSON валидный, но проблема со структурой: %v", err)
+			log.Printf("📄 Parsed keys: %v", getMapKeys(rawMap))
+		} else {
+			// JSON невалидный
+			log.Printf("❌ JSON Parse Error: %v", err)
+			log.Printf("📄 Content (first 500 chars): %s", TruncateString(content, 500))
+		}
+		return nil, fmt.Errorf("invalid JSON response: %w", err)
 	}
 
 	// Инициализируем пустые массивы если null
@@ -138,6 +156,17 @@ func (p *GenericProvider) GenerateSecurityAnalysis(
 	if !validRiskLevels[result.RiskLevel] {
 		fmt.Printf("⚠️ Невалидный risk_level '%s', устанавливаем 'low'\n", result.RiskLevel)
 		result.RiskLevel = "low"
+	}
+
+	// Автоматически устанавливаем has_vulnerability на основе risk_level
+	// Если risk_level не "low", значит есть уязвимость
+	if result.RiskLevel == "medium" || result.RiskLevel == "high" || result.RiskLevel == "critical" {
+		result.HasVulnerability = true
+	}
+
+	// Также проверяем наличие списка уязвимостей
+	if len(result.VulnerabilityTypes) > 0 {
+		result.HasVulnerability = true
 	}
 
 	// Устанавливаем дополнительные поля
@@ -410,6 +439,79 @@ func (p *GenericProvider) GetName() string {
 
 func (p *GenericProvider) GetModel() string {
 	return p.model
+}
+
+// getMapKeys возвращает ключи map для диагностики
+func getMapKeys(m map[string]interface{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+// normalizeJSONString экранирует неэкранированные спецсимволы в JSON
+func normalizeJSONString(content string) string {
+	// Используем json.Marshal для безопасного экранирования строк
+	// Но сначала нужно извлечь строковые значения и обработать их
+
+	var result strings.Builder
+	result.Grow(len(content) + len(content)/10)
+
+	inString := false
+	escaped := false
+
+	for i := 0; i < len(content); i++ {
+		ch := content[i]
+
+		// Обрабатываем экранирование
+		if escaped {
+			result.WriteByte(ch)
+			escaped = false
+			continue
+		}
+
+		if ch == '\\' {
+			result.WriteByte(ch)
+			escaped = true
+			continue
+		}
+
+		// Переключаем режим строки при встрече "
+		if ch == '"' {
+			inString = !inString
+			result.WriteByte(ch)
+			continue
+		}
+
+		// Внутри строки обрабатываем спецсимволы
+		if inString {
+			switch ch {
+			case '\n':
+				result.WriteString("\\n")
+			case '\r':
+				result.WriteString("\\r")
+			case '\t':
+				result.WriteString("\\t")
+			case '\b':
+				result.WriteString("\\b")
+			case '\f':
+				result.WriteString("\\f")
+			default:
+				// Для остальных символов проверяем, не нужно ли экранирование
+				if ch < 0x20 {
+					// Управляющие символы экранируем как \uXXXX
+					result.WriteString(fmt.Sprintf("\\u%04x", ch))
+				} else {
+					result.WriteByte(ch)
+				}
+			}
+		} else {
+			result.WriteByte(ch)
+		}
+	}
+
+	return result.String()
 }
 
 // cleanJSONResponse очищает ответ от markdown и лишних символов

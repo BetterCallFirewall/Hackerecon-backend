@@ -4,6 +4,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/BetterCallFirewall/Hackerecon/internal/llm"
 	"github.com/BetterCallFirewall/Hackerecon/internal/models"
 	"github.com/PuerkitoBio/goquery"
 )
@@ -100,7 +101,7 @@ func (e *DataExtractor) extractSecrets(content, location string) []models.Extrac
 				secrets = append(secrets, models.ExtractedSecret{
 					Type:       "potential_secret", // LLM определит конкретный тип
 					Value:      truncateSecret(secretValue),
-					Context:    truncateString(match[0], maxContextLength),
+					Context:    llm.TruncateString(match[0], maxContextLength),
 					Confidence: 0.5, // Базовая уверенность, LLM уточнит
 					Location:   location,
 				})
@@ -127,7 +128,7 @@ func (e *DataExtractor) extractJavaScriptFunctions(content string) []models.JSFu
 			functions = append(functions, models.JSFunction{
 				Name:       funcName,
 				Parameters: params,
-				Context:    truncateString(match[0], maxFunctionContextLength),
+				Context:    llm.TruncateString(match[0], maxFunctionContextLength),
 				Suspicious: false, // LLM определит
 				Reason:     "",    // LLM определит
 			})
@@ -154,6 +155,13 @@ func (e *DataExtractor) parseParameters(paramsStr string) []string {
 // extractURLsFromJS извлекает URL'ы из JavaScript
 func (e *DataExtractor) extractURLsFromJS(content string) []string {
 	urls := make([]string, 0)
+
+	// Простые regex для извлечения URL из JS
+	urlRegexes := []*regexp.Regexp{
+		regexp.MustCompile(`https?://[a-zA-Z0-9\-._~:/?#[\]@!$&'()*+,;=%]+`),
+		regexp.MustCompile(`/api/[a-zA-Z0-9\-._~:/?#[\]@!$&'()*+,;=%]*`),
+		regexp.MustCompile(`/v[0-9]+/[a-zA-Z0-9\-._~:/?#[\]@!$&'()*+,;=%]*`),
+	}
 
 	for _, regex := range urlRegexes {
 		matches := regex.FindAllString(content, -1)
@@ -213,7 +221,7 @@ func (e *DataExtractor) extractComments(content string, data *models.HTMLData) {
 		if len(match) >= 2 {
 			comment := strings.TrimSpace(match[1])
 			if len(comment) > 5 && !strings.HasPrefix(comment, "<!") {
-				data.Comments = append(data.Comments, truncateString(comment, maxCommentLength))
+				data.Comments = append(data.Comments, llm.TruncateString(comment, maxCommentLength))
 			}
 		}
 	}

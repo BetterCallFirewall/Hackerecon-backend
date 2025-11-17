@@ -15,7 +15,6 @@ import (
 	"github.com/BetterCallFirewall/Hackerecon/internal/llm"
 	"github.com/BetterCallFirewall/Hackerecon/internal/websocket"
 	"github.com/firebase/genkit/go/genkit"
-	"github.com/firebase/genkit/go/plugins/googlegenai"
 )
 
 type SecurityProxyWithGenkit struct {
@@ -33,60 +32,36 @@ func NewSecurityProxyWithGenkit(cfg config.LLMConfig, wsHub *websocket.Websocket
 	var analyzer *GenkitSecurityAnalyzer
 	var err error
 
-	// Выбираем провайдера на основе конфигурации
-	switch cfg.Provider {
-	case "gemini", "": // Пустое значение = gemini по умолчанию
-		// Инициализируем Genkit с плагинами
-		genkitApp := genkit.Init(
-			ctx,
-			genkit.WithPlugins(
-				&googlegenai.GoogleAI{
-					APIKey: cfg.ApiKey,
-				},
-			),
-			genkit.WithDefaultModel(cfg.Model),
-		)
-
-		analyzer, err = newGenkitSecurityAnalyzer(genkitApp, cfg.Model, wsHub)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create Gemini analyzer: %w", err)
-		}
-		log.Printf("✅ Используется Gemini модель: %s", cfg.Model)
-
-	case "generic":
-		// Создаём Generic провайдер
-		var format llm.APIFormat
-		switch cfg.Format {
-		case "ollama":
-			format = llm.FormatOllama
-		case "raw":
-			format = llm.FormatRaw
-		default:
-			format = llm.FormatOpenAI // По умолчанию OpenAI-compatible
-		}
-
-		genericProvider := llm.NewGenericProvider(
-			llm.GenericConfig{
-				Name:    "custom-llm",
-				Model:   cfg.Model, // Передассссвлрасапвреуушмгшаеосрпмлипргскатём модель из конфигурации
-				BaseURL: cfg.BaseURL,
-				APIKey:  cfg.ApiKey,
-				Format:  format,
-			},
-		)
-
-		// Создаём пустой genkitApp для flows (можно оптимизировать позже)
-		genkitApp := genkit.Init(ctx)
-
-		analyzer, err = newSecurityAnalyzerWithProvider(genkitApp, cfg.Model, genericProvider, wsHub)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create Generic analyzer: %w", err)
-		}
-		log.Printf("✅ Используется Generic провайдер: %s (модель: %s, формат: %s)", cfg.BaseURL, cfg.Model, cfg.Format)
-
+	// Определяем формат API
+	var format llm.APIFormat
+	switch cfg.Format {
+	case "ollama":
+		format = llm.FormatOllama
+	case "raw":
+		format = llm.FormatRaw
 	default:
-		return nil, fmt.Errorf("unknown LLM provider: %s", cfg.Provider)
+		format = llm.FormatOpenAI // По умолчанию OpenAI-compatible
 	}
+
+	// Создаём провайдер
+	provider := llm.NewGenericProvider(
+		llm.GenericConfig{
+			Name:    cfg.Provider,
+			Model:   cfg.Model,
+			BaseURL: cfg.BaseURL,
+			APIKey:  cfg.ApiKey,
+			Format:  format,
+		},
+	)
+
+	// Создаём genkitApp для flows
+	genkitApp := genkit.Init(ctx)
+
+	analyzer, err = NewGenkitSecurityAnalyzer(genkitApp, provider, wsHub)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create analyzer: %w", err)
+	}
+	log.Printf("✅ Используется LLM провайдер: %s (модель: %s, формат: %s)", cfg.Provider, cfg.Model, cfg.Format)
 
 	burpIntegration := NewBurpIntegration(cfg.BurpHost, cfg.BurpPort)
 
@@ -219,7 +194,7 @@ func (ps *SecurityProxyWithGenkit) handleHTTP(w http.ResponseWriter, req *http.R
 		return
 	}
 
-	// Создаем новый запрос для отправки
+	// Клонируем запрос для отправки
 	outReq := createProxyRequest(req, body)
 
 	// Получаем HTTP клиента с учетом fallback логики
@@ -278,8 +253,13 @@ func createProxyRequest(inReq *http.Request, body []byte) *http.Request {
 
 	outReq.RequestURI = ""
 
-	// Копируем заголовки, исключая проблемные
-	copyHeaders(outReq.Header, inReq.Header)
+	// Клонируем заголовки
+	outReq.Header = inReq.Header.Clone()
+
+	// Удаляем проблемные заголовки
+	for _, h := range []string{"Connection", "Proxy-Connection", "Proxy-Authenticate", "Proxy-Authorization", "Te", "Trailers", "Upgrade"} {
+		outReq.Header.Del(h)
+	}
 
 	// Устанавливаем правильный Host заголовок
 	outReq.Host = inReq.Host
@@ -296,15 +276,12 @@ func (ps *SecurityProxyWithGenkit) analyzeTraffic(
 	req *http.Request, reqBody string, resp *http.Response, respBody string,
 ) {
 	contentType := resp.Header.Get("Content-Type")
-	if isSkippableContent(contentType, req.URL.Path) {
-		log.Printf("⚪️ Пропуск анализа для %s (Content-Type: %s)", req.URL.String(), contentType)
-		return
-	}
 
+	// Фильтрация выполняется в Analyzer через RequestFilter
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	_, err := ps.Analyzer.AnalyzeHTTPTraffic(ctx, req, resp, reqBody, respBody, contentType)
+	err := ps.Analyzer.AnalyzeHTTPTraffic(ctx, req, resp, reqBody, respBody, contentType)
 	if err != nil {
 		log.Printf("❌ Ошибка анализа %s: %v", req.URL.String(), err)
 	}

@@ -29,11 +29,15 @@ func (ps *SecurityProxyWithGenkit) Start() error {
 	if ps.burpIntegration.enabled {
 		log.Printf("📡 Upstream Burp Suite: %s:%s", ps.burpIntegration.host, ps.burpIntegration.port)
 	}
-	log.Printf("🤖 Genkit AI анализ: Включен: %s", ps.Analyzer.model)
+	log.Printf("🤖 LLM анализ: Включен")
 
 	return ps.server.ListenAndServe()
 }
 
 func (ps *SecurityProxyWithGenkit) Stop() error {
+	if ps.server != nil {
+		log.Printf("🛑 Остановка Security Proxy...")
+		return ps.server.Close()
+	}
 	return nil
 }

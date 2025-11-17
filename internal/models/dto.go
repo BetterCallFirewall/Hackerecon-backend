@@ -14,3 +14,15 @@ type RequestResponseInfo struct {
 	ReqBody     string            `json:"request_body,omitempty"`
 	RespBody    string            `json:"response_body,omitempty"`
 }
+
+// HypothesisDTO используется для отправки гипотезы через API
+type HypothesisDTO struct {
+	Type string          `json:"type"`
+	Data *HypothesisData `json:"data"`
+}
+
+// HypothesisData содержит данные гипотезы
+type HypothesisData struct {
+	Hypothesis *SecurityHypothesis `json:"hypothesis"`
+	TechStack  *TechStack          `json:"tech_stack,omitempty"`
+}

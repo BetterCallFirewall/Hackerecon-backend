@@ -147,11 +147,11 @@ go run cmd/main.go cmd/api.go
 ### Компоненты
 
 - **SecurityProxyWithGenkit** — главный прокси-сервер
-- **GenkitSecurityAnalyzer** — AI анализатор безопасности
+- **GenkitSecurityAnalyzer** — AI анализатор безопасности с Genkit flows
+- **SimpleGenkitProvider** — универсальный LLM провайдер (Gemini, OpenAI, Ollama, LocalAI)
 - **RequestFilter** — умная фильтрация запросов
 - **AnalysisCache** — кэширование результатов
 - **SiteContextManager** — управление контекстом сайтов
-- **TechDetector** — обнаружение технологий
 - **HypothesisGenerator** — генерация гипотез об уязвимостях
 - **WebsocketManager** — real-time уведомления
 

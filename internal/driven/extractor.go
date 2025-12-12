@@ -42,9 +42,7 @@ func (e *DataExtractor) ExtractFromContent(reqBody, respBody, contentType string
 
 		// Анализируем только HTML контент для form actions и комментариев
 		if e.isHTMLContent(content, contentType) {
-			htmlData := e.extractHTMLData(content)
-			extractedData.FormActions = append(extractedData.FormActions, htmlData.FormActions...)
-			extractedData.Comments = append(extractedData.Comments, htmlData.Comments...)
+			e.extractHTMLData(content, extractedData)
 		}
 	}
 
@@ -58,37 +56,22 @@ func (e *DataExtractor) isHTMLContent(content, contentType string) bool {
 		strings.Contains(content, "<!DOCTYPE")
 }
 
-// extractHTMLData извлекает данные из HTML с помощью goquery
-func (e *DataExtractor) extractHTMLData(content string) *models.HTMLData {
-	data := &models.HTMLData{
-		FormActions: make([]string, 0),
-		Comments:    make([]string, 0),
-	}
-
+// extractHTMLData извлекает данные из HTML напрямую в extractedData
+func (e *DataExtractor) extractHTMLData(content string, data *models.ExtractedData) {
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(content))
 	if err != nil {
-		return data
+		return
 	}
 
-	e.extractFormActions(doc, data)
-	e.extractComments(content, data)
-
-	return data
-}
-
-// extractFormActions извлекает form actions из HTML
-func (e *DataExtractor) extractFormActions(doc *goquery.Document, data *models.HTMLData) {
+	// Извлекаем form actions
 	doc.Find("form[action]").Each(func(i int, s *goquery.Selection) {
 		if action, exists := s.Attr("action"); exists && action != "#" {
 			data.FormActions = append(data.FormActions, action)
 		}
 	})
-}
 
-// extractComments извлекает комментарии из HTML
-func (e *DataExtractor) extractComments(content string, data *models.HTMLData) {
+	// Извлекаем комментарии
 	comments := commentRegex.FindAllStringSubmatch(content, -1)
-
 	for _, match := range comments {
 		if len(match) >= 2 {
 			comment := strings.TrimSpace(match[1])

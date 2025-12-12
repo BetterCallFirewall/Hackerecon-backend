@@ -11,7 +11,7 @@ type VulnerabilityReport struct {
 	AnalysisResult SecurityAnalysisResponse `json:"analysis_result" jsonschema:"description=LLM analysis result"`
 }
 
-// SecurityAnalysisResponse структурированный ответ от LLM
+// SecurityAnalysisResponse структурированный ответ от LLM (только данные для анализа)
 type SecurityAnalysisResponse struct {
 	HasVulnerability   bool                `json:"has_vulnerability" jsonschema:"description=Indicates if a vulnerability was found"`
 	RiskLevel          string              `json:"risk_level" jsonschema:"enum=low,enum=medium,enum=high,enum=critical,description=Risk level assessment"`
@@ -20,10 +20,6 @@ type SecurityAnalysisResponse struct {
 	VulnerabilityTypes []string            `json:"vulnerability_types,omitempty" jsonschema:"description=List of detected vulnerability types"`
 	ConfidenceScore    float64             `json:"confidence_score,omitempty" jsonschema:"description=Confidence in analysis (0.0-1.0)"`
 	ExtractedSecrets   []ExtractedSecret   `json:"extracted_secrets,omitempty" jsonschema:"description=Found secrets and sensitive data"`
-	Timestamp          time.Time           `json:"timestamp" jsonschema:"description=Analysis timestamp"`
-
-	IdentifiedUserRole    string       `json:"identified_user_role,omitempty" jsonschema:"description=The user role identified in this request (e.g., 'guest', 'user', 'admin')"`
-	IdentifiedDataObjects []DataObject `json:"identified_data_objects,omitempty" jsonschema:"description=Data objects and their fields found in the request/response"`
 }
 
 // SecurityCheckItem - элемент чеклиста для пентестера (как эксплуатировать уязвимость)

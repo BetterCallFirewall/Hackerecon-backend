@@ -107,7 +107,17 @@ func TruncateString(s string, maxLen int) string {
 func BuildURLAnalysisPrompt(req *models.URLAnalysisRequest) string {
 	techStackInfo := "не определен"
 	if req.SiteContext.TechStack != nil {
-		techStackInfo = formatTechStackCompact(req.SiteContext.TechStack)
+		if req.SiteContext.TechStack != nil && len(req.SiteContext.TechStack.Technologies) > 0 {
+			techs := make([]string, 0, len(req.SiteContext.TechStack.Technologies))
+			for _, tech := range req.SiteContext.TechStack.Technologies {
+				techs = append(techs, tech.Name)
+			}
+			// Ограничиваем до 5 технологий для краткости
+			if len(techs) > 5 {
+				techs = techs[:5]
+			}
+			techStackInfo = strings.Join(techs, ", ")
+		}
 	}
 
 	responsePreview := TruncateString(req.ResponseBody, 300)
@@ -181,23 +191,21 @@ func BuildHypothesisPrompt(req *models.HypothesisRequest) string {
 	previousHypothesisText := "Нет предыдущей гипотезы"
 	if req.PreviousHypothesis != nil {
 		previousHypothesisText = fmt.Sprintf(
-			"Предыдущая гипотеза: %s\nВектор атаки: %s\nConfidence: %.2f\nStatus: %s",
+			"Предыдущая гипотеза: %s\nВектор атаки: %s\nConfidence: %.2f",
 			req.PreviousHypothesis.Title,
 			req.PreviousHypothesis.AttackVector,
 			req.PreviousHypothesis.Confidence,
-			req.PreviousHypothesis.Status,
 		)
 	}
 
 	// Форматируем стек технологий
 	techStackDesc := "Стек технологий не определен"
-	if req.SiteContext.TechStack != nil {
-		techStackDesc = fmt.Sprintf(
-			"Frontend: %s, Backend: %s, Database: %s",
-			formatTechList(req.SiteContext.TechStack.Frontend),
-			formatTechList(req.SiteContext.TechStack.Backend),
-			formatTechList(req.SiteContext.TechStack.Database),
-		)
+	if req.SiteContext.TechStack != nil && len(req.SiteContext.TechStack.Technologies) > 0 {
+		techs := make([]string, 0, len(req.SiteContext.TechStack.Technologies))
+		for _, tech := range req.SiteContext.TechStack.Technologies {
+			techs = append(techs, fmt.Sprintf("%s (%.2f)", tech.Name, tech.Confidence))
+		}
+		techStackDesc = strings.Join(techs, ", ")
 	}
 
 	return fmt.Sprintf(
@@ -278,8 +286,12 @@ func BuildHypothesisPrompt(req *models.HypothesisRequest) string {
 func filterHighQualityPatterns(patterns []*models.URLPattern) []*models.URLPattern {
 	filtered := make([]*models.URLPattern, 0)
 	for _, pattern := range patterns {
-		if pattern.LastNote != nil && pattern.LastNote.Confidence >= 0.7 {
-			filtered = append(filtered, pattern)
+		// Берем последнюю заметку из массива
+		if len(pattern.Notes) > 0 {
+			lastNote := pattern.Notes[len(pattern.Notes)-1]
+			if lastNote.Confidence >= 0.7 {
+				filtered = append(filtered, pattern)
+			}
 		}
 	}
 	return filtered
@@ -293,17 +305,25 @@ func groupPatternsByAttackType(patterns []*models.URLPattern) string {
 	otherPatterns := make([]string, 0)
 
 	for _, p := range patterns {
-		patternStr := fmt.Sprintf("- %s (confidence: %.2f)", p.Pattern, p.LastNote.Confidence)
-		if p.LastNote != nil {
-			patternStr += fmt.Sprintf(" - %s", p.LastNote.Content)
+		// Получаем последнюю заметку
+		var lastNote *models.URLNote
+		if len(p.Notes) > 0 {
+			lastNote = &p.Notes[len(p.Notes)-1]
 		}
+
+		if lastNote == nil {
+			continue
+		}
+
+		patternStr := fmt.Sprintf("- %s (confidence: %.2f)", p.Pattern, lastNote.Confidence)
+		patternStr += fmt.Sprintf(" - %s", lastNote.Content)
 
 		// Классифицируем по вероятному типу атаки
 		if strings.Contains(p.Pattern, "{") || strings.Contains(strings.ToLower(p.Pattern), "id") {
 			idorPatterns = append(idorPatterns, patternStr)
 		} else if strings.Contains(strings.ToLower(p.Pattern), "admin") || strings.Contains(strings.ToLower(p.Pattern), "auth") {
 			authPatterns = append(authPatterns, patternStr)
-		} else if p.LastNote != nil && (strings.Contains(strings.ToLower(p.LastNote.VulnHint), "sql") || strings.Contains(strings.ToLower(p.LastNote.VulnHint), "injection")) {
+		} else if strings.Contains(strings.ToLower(lastNote.VulnHint), "sql") || strings.Contains(strings.ToLower(lastNote.VulnHint), "injection") {
 			sqlPatterns = append(sqlPatterns, patternStr)
 		} else {
 			otherPatterns = append(otherPatterns, patternStr)
@@ -347,17 +367,22 @@ func formatSuspiciousPatterns(patterns []*models.URLPattern) string {
 
 	var result strings.Builder
 	for i, p := range patterns {
-		if p.LastNote == nil || p.LastNote.Confidence < 0.7 {
+		// Получаем последнюю заметку
+		var lastNote *models.URLNote
+		if len(p.Notes) > 0 {
+			lastNote = &p.Notes[len(p.Notes)-1]
+		}
+
+		if lastNote == nil || lastNote.Confidence < 0.7 {
 			continue // Пропускаем низкокачественные
 		}
 
 		result.WriteString(fmt.Sprintf("\n%d. URL Pattern: %s\n", i+1, p.Pattern))
-		result.WriteString(fmt.Sprintf("   Заметка: %s\n", p.LastNote.Content))
-		result.WriteString(fmt.Sprintf("   Подозрительность: %v (confidence: %.2f)\n", p.LastNote.Suspicious, p.LastNote.Confidence))
-		if p.LastNote.VulnHint != "" {
-			result.WriteString(fmt.Sprintf("   Подсказка: %s\n", p.LastNote.VulnHint))
+		result.WriteString(fmt.Sprintf("   Заметка: %s\n", lastNote.Content))
+		result.WriteString(fmt.Sprintf("   Подозрительность: %v (confidence: %.2f)\n", lastNote.Suspicious, lastNote.Confidence))
+		if lastNote.VulnHint != "" {
+			result.WriteString(fmt.Sprintf("   Подсказка: %s\n", lastNote.VulnHint))
 		}
-		result.WriteString(fmt.Sprintf("   Контекст: %s\n", p.LastNote.Context))
 	}
 
 	if result.Len() == 0 {
@@ -367,56 +392,4 @@ func formatSuspiciousPatterns(patterns []*models.URLPattern) string {
 	return result.String()
 }
 
-// Вспомогательные функции
-
-func formatTechList(techs []models.Technology) string {
-	if len(techs) == 0 {
-		return "не определено"
-	}
-
-	names := make([]string, 0, len(techs))
-	for _, tech := range techs {
-		if tech.Version != "" {
-			names = append(names, fmt.Sprintf("%s v%s", tech.Name, tech.Version))
-		} else {
-			names = append(names, tech.Name)
-		}
-	}
-
-	return strings.Join(names, ", ")
-}
-
-func formatTechStackCompact(techStack *models.TechStack) string {
-	if techStack == nil {
-		return "не определен"
-	}
-
-	var technologies []string
-
-	if len(techStack.Frontend) > 0 {
-		for _, tech := range techStack.Frontend {
-			technologies = append(technologies, tech.Name)
-		}
-	}
-	if len(techStack.Backend) > 0 {
-		for _, tech := range techStack.Backend {
-			technologies = append(technologies, tech.Name)
-		}
-	}
-	if len(techStack.Database) > 0 {
-		for _, tech := range techStack.Database {
-			technologies = append(technologies, tech.Name)
-		}
-	}
-
-	if len(technologies) == 0 {
-		return "не определен"
-	}
-
-	// Возвращаем первые 5 технологий
-	if len(technologies) > 5 {
-		technologies = technologies[:5]
-	}
-
-	return strings.Join(technologies, ", ")
-}
+// Вспомогательные функции удалены (formatTechList, formatTechStackCompact) - больше не нужны

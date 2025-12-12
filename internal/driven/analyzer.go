@@ -94,9 +94,23 @@ func NewGenkitSecurityAnalyzer(
 				return nil, fmt.Errorf("failed to generate security analysis: %w", err)
 			}
 
-			// Step 3: Finalize result (traced)
-			return genkit.Run(ctx, "finalize-result", func() (*models.SecurityAnalysisResponse, error) {
-				analyzer.finalizeAnalysisResult(result, req)
+			// Step 3: Normalize and validate result (traced)
+			return genkit.Run(ctx, "normalize-result", func() (*models.SecurityAnalysisResponse, error) {
+				// Normalize risk level
+				result.RiskLevel = strings.ToLower(strings.TrimSpace(result.RiskLevel))
+				validLevels := map[string]bool{"low": true, "medium": true, "high": true, "critical": true}
+				if !validLevels[result.RiskLevel] {
+					log.Printf("⚠️ Невалидный risk_level '%s', устанавливаем 'low'", result.RiskLevel)
+					result.RiskLevel = "low"
+				}
+
+				// Clamp confidence score
+				if result.ConfidenceScore < 0 {
+					result.ConfidenceScore = 0
+				} else if result.ConfidenceScore > 1.0 {
+					result.ConfidenceScore = 1.0
+				}
+
 				return result, nil
 			})
 		},
@@ -114,8 +128,8 @@ func NewGenkitSecurityAnalyzer(
 				return nil, fmt.Errorf("failed to generate URL analysis: %w", err)
 			}
 
-			// Validate result
-			return genkit.Run(ctx, "validate-url-result", func() (*models.URLAnalysisResponse, error) {
+			// Normalize and validate result
+			return genkit.Run(ctx, "normalize-url-result", func() (*models.URLAnalysisResponse, error) {
 				if result.URLNote == nil {
 					result.URLNote = &models.URLNote{
 						Content:    "Analysis completed",
@@ -123,6 +137,14 @@ func NewGenkitSecurityAnalyzer(
 						Confidence: 0.5,
 					}
 				}
+
+				// Clamp confidence to [0.0, 1.0]
+				if result.URLNote.Confidence < 0 {
+					result.URLNote.Confidence = 0
+				} else if result.URLNote.Confidence > 1.0 {
+					result.URLNote.Confidence = 1.0
+				}
+
 				return result, nil
 			})
 		},
@@ -140,19 +162,29 @@ func NewGenkitSecurityAnalyzer(
 				return nil, fmt.Errorf("failed to generate hypothesis: %w", err)
 			}
 
-			// Validate and normalize hypothesis
-			return genkit.Run(ctx, "validate-hypothesis", func() (*models.HypothesisResponse, error) {
+			// Normalize and validate hypothesis
+			return genkit.Run(ctx, "normalize-hypothesis", func() (*models.HypothesisResponse, error) {
 				if result.Hypothesis == nil {
 					result.Hypothesis = &models.SecurityHypothesis{
-						ID:          uuid.New().String()[:8],
 						Title:       "No hypothesis generated",
 						Description: "Insufficient data",
 						Confidence:  0.0,
-						Status:      models.HypothesisActive,
 					}
-				} else if result.Hypothesis.ID == "" {
-					result.Hypothesis.ID = uuid.New().String()[:8]
 				}
+
+				// Normalize enum fields
+				result.Hypothesis.Impact = normalizeEnum(result.Hypothesis.Impact,
+					[]string{"low", "medium", "high", "critical"}, "medium")
+				result.Hypothesis.Effort = normalizeEnum(result.Hypothesis.Effort,
+					[]string{"low", "medium", "high"}, "medium")
+
+				// Clamp confidence to [0.0, 1.0]
+				if result.Hypothesis.Confidence < 0 {
+					result.Hypothesis.Confidence = 0
+				} else if result.Hypothesis.Confidence > 1.0 {
+					result.Hypothesis.Confidence = 1.0
+				}
+
 				return result, nil
 			})
 		},
@@ -194,29 +226,15 @@ func (analyzer *GenkitSecurityAnalyzer) performSecurityAnalysis(
 	return analyzer.analysisFlow.Run(ctx, req)
 }
 
-// finalizeAnalysisResult финализирует результат анализа безопасности
-func (analyzer *GenkitSecurityAnalyzer) finalizeAnalysisResult(
-	result *models.SecurityAnalysisResponse,
-	req *models.SecurityAnalysisRequest,
-) {
-	analyzer.normalizeAndValidateRiskLevel(result)
-}
-
-// normalizeAndValidateRiskLevel нормализует и валидирует уровень риска
-func (analyzer *GenkitSecurityAnalyzer) normalizeAndValidateRiskLevel(result *models.SecurityAnalysisResponse) {
-	result.RiskLevel = strings.ToLower(strings.TrimSpace(result.RiskLevel))
-
-	validRiskLevels := map[string]bool{
-		"low":      true,
-		"medium":   true,
-		"high":     true,
-		"critical": true,
+// normalizeEnum нормализует enum поле, приводя к lowercase и проверяя валидность
+func normalizeEnum(value string, validValues []string, defaultValue string) string {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	for _, valid := range validValues {
+		if normalized == valid {
+			return normalized
+		}
 	}
-
-	if !validRiskLevels[result.RiskLevel] {
-		log.Printf("⚠️ Невалидный risk_level '%s', устанавливаем 'low'", result.RiskLevel)
-		result.RiskLevel = "low"
-	}
+	return defaultValue
 }
 
 // AnalyzeHTTPTraffic оптимизированный анализ HTTP трафика с двухэтапной проверкой
@@ -424,24 +442,6 @@ func (analyzer *GenkitSecurityAnalyzer) shouldExtractData(contentType, body stri
 	return isHTML || isJS
 }
 
-// Новые функции для оптимизированного анализа
-
-// performURLAnalysis выполняет быстрый анализ URL через flow (с tracing)
-func (analyzer *GenkitSecurityAnalyzer) performURLAnalysis(
-	ctx context.Context, req *models.URLAnalysisRequest,
-) (*models.URLAnalysisResponse, error) {
-	// Используем flow для автоматического tracing
-	return analyzer.urlAnalysisFlow.Run(ctx, req)
-}
-
-// performHypothesisGeneration выполняет генерацию гипотез через flow (с tracing)
-func (analyzer *GenkitSecurityAnalyzer) performHypothesisGeneration(
-	ctx context.Context, req *models.HypothesisRequest,
-) (*models.HypothesisResponse, error) {
-	// Используем flow для автоматического tracing
-	return analyzer.hypothesisGen.hypothesisFlow.Run(ctx, req)
-}
-
 // Функции для работы с кэшем
 
 // checkCacheAndDecide проверяет кэш и решает, нужно ли пропустить анализ
@@ -463,19 +463,9 @@ func (analyzer *GenkitSecurityAnalyzer) updateURLPattern(
 	analyzer.contextManager.UpdateURLPattern(siteContext, normalizedURL, method, urlNote)
 }
 
-// GetCurrentHypothesis возвращает текущую гипотезу для хоста
-func (analyzer *GenkitSecurityAnalyzer) GetCurrentHypothesis(host string) *models.SecurityHypothesis {
-	return analyzer.hypothesisGen.GetCurrent(host)
-}
-
 // GenerateHypothesisForHost принудительно генерирует гипотезу для хоста
 func (analyzer *GenkitSecurityAnalyzer) GenerateHypothesisForHost(host string) (*models.HypothesisResponse, error) {
 	return analyzer.hypothesisGen.GenerateForHost(host)
-}
-
-// GetAllHypotheses возвращает все гипотезы для всех хостов
-func (analyzer *GenkitSecurityAnalyzer) GetAllHypotheses() map[string]*models.SecurityHypothesis {
-	return analyzer.hypothesisGen.GetAll()
 }
 
 // GetSiteContext возвращает контекст для хоста (для отладки)

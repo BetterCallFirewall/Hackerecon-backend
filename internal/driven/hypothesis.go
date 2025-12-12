@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"time"
 
 	"github.com/BetterCallFirewall/Hackerecon/internal/models"
 	"github.com/BetterCallFirewall/Hackerecon/internal/websocket"
@@ -62,7 +61,7 @@ func (g *HypothesisGenerator) GenerateForHost(host string) (*models.HypothesisRe
 		SiteContext:         siteContext,
 		SuspiciousPatterns:  suspiciousPatterns,
 		TechVulnerabilities: techInfo,
-		PreviousHypothesis:  siteContext.MainHypothesis,
+		PreviousHypothesis:  nil, // Убрано из SiteContext
 	}
 
 	// Запускаем генерацию гипотезы
@@ -103,8 +102,12 @@ func (g *HypothesisGenerator) collectSuspiciousPatterns(siteContext *models.Site
 	suspiciousPatterns := make([]*models.URLPattern, 0)
 
 	for _, pattern := range siteContext.URLPatterns {
-		if pattern.LastNote != nil && pattern.LastNote.Suspicious {
-			suspiciousPatterns = append(suspiciousPatterns, pattern)
+		// Берем последнюю заметку из массива
+		if len(pattern.Notes) > 0 {
+			lastNote := pattern.Notes[len(pattern.Notes)-1]
+			if lastNote.Suspicious {
+				suspiciousPatterns = append(suspiciousPatterns, pattern)
+			}
 		}
 	}
 
@@ -115,56 +118,17 @@ func (g *HypothesisGenerator) collectSuspiciousPatterns(siteContext *models.Site
 func (g *HypothesisGenerator) analyzeTechVulnerabilities(siteContext *models.SiteContext) []string {
 	techInfo := make([]string, 0)
 
-	if siteContext.TechStack == nil {
+	if siteContext.TechStack == nil || len(siteContext.TechStack.Technologies) == 0 {
 		return techInfo
 	}
 
-	// Собираем информацию о Frontend технологиях
-	for _, tech := range siteContext.TechStack.Frontend {
-		info := g.formatTechInfo(tech, "Frontend")
-		techInfo = append(techInfo, info)
-	}
-
-	// Собираем информацию о Backend технологиях
-	for _, tech := range siteContext.TechStack.Backend {
-		info := g.formatTechInfo(tech, "Backend")
-		techInfo = append(techInfo, info)
-	}
-
-	// Собираем информацию о Database технологиях
-	for _, tech := range siteContext.TechStack.Database {
-		info := g.formatTechInfo(tech, "Database")
-		techInfo = append(techInfo, info)
-	}
-
-	// Собираем информацию о Frameworks
-	for _, tech := range siteContext.TechStack.Frameworks {
-		info := g.formatTechInfo(tech, "Framework")
-		techInfo = append(techInfo, info)
-	}
-
-	// Собираем информацию о Servers
-	for _, tech := range siteContext.TechStack.Servers {
-		info := g.formatTechInfo(tech, "Server")
+	// Собираем информацию о всех технологиях
+	for _, tech := range siteContext.TechStack.Technologies {
+		info := fmt.Sprintf("%s (confidence: %.2f) - %s", tech.Name, tech.Confidence, tech.Reason)
 		techInfo = append(techInfo, info)
 	}
 
 	return techInfo
-}
-
-// formatTechInfo форматирует информацию о технологии
-func (g *HypothesisGenerator) formatTechInfo(tech models.Technology, category string) string {
-	info := fmt.Sprintf("%s: %s", category, tech.Name)
-
-	if tech.Version != "" {
-		info += fmt.Sprintf(" (версия: %s)", tech.Version)
-	}
-
-	if tech.Confidence > 0 {
-		info += fmt.Sprintf(" [уверенность: %.2f]", tech.Confidence)
-	}
-
-	return info
 }
 
 // validateDataQuality проверяет качество данных для генерации гипотезы
@@ -173,9 +137,11 @@ func (g *HypothesisGenerator) validateDataQuality(siteContext *models.SiteContex
 	totalNotes := 0
 
 	for _, pattern := range siteContext.URLPatterns {
-		if pattern.LastNote != nil {
+		// Берем последнюю заметку из массива
+		if len(pattern.Notes) > 0 {
+			lastNote := pattern.Notes[len(pattern.Notes)-1]
 			totalNotes++
-			if pattern.LastNote.Confidence >= 0.6 {
+			if lastNote.Confidence >= 0.6 {
 				highQualityNotes++
 			}
 		}
@@ -198,30 +164,18 @@ func (g *HypothesisGenerator) updateSiteContextWithHypothesis(
 	siteContext *models.SiteContext,
 	hypothesis *models.SecurityHypothesis,
 ) {
-	siteContext.MainHypothesis = hypothesis
-	siteContext.LastHypothesisUpdate = time.Now()
-	siteContext.LastUpdated = time.Now()
+	// Просто логируем - гипотеза больше не хранится в SiteContext
+	// (убрано MainHypothesis, LastHypothesisUpdate, LastUpdated)
 }
 
-// GetCurrent возвращает текущую гипотезу для хоста
+// GetCurrent возвращает текущую гипотезу для хоста (устарело)
 func (g *HypothesisGenerator) GetCurrent(host string) *models.SecurityHypothesis {
-	siteContext := g.contextManager.Get(host)
-	if siteContext == nil {
-		return nil
-	}
-	return siteContext.MainHypothesis
+	// Гипотеза больше не хранится в SiteContext
+	return nil
 }
 
-// GetAll возвращает все гипотезы для всех хостов
+// GetAll возвращает все гипотезы для всех хостов (устарело)
 func (g *HypothesisGenerator) GetAll() map[string]*models.SecurityHypothesis {
-	result := make(map[string]*models.SecurityHypothesis)
-
-	contexts := g.contextManager.GetAll()
-	for host, context := range contexts {
-		if context.MainHypothesis != nil {
-			result[host] = context.MainHypothesis
-		}
-	}
-
-	return result
+	// Гипотезы больше не хранятся в SiteContext
+	return make(map[string]*models.SecurityHypothesis)
 }

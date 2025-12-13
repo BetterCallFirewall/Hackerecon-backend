@@ -73,21 +73,9 @@ func (g *HypothesisGenerator) GenerateForHost(host string) (*models.HypothesisRe
 		return nil, fmt.Errorf("failed to generate hypothesis: %w", err)
 	}
 
-	// Обновляем контекст с главной гипотезой (первый вектор или старый формат)
-	var mainHypothesis *models.SecurityHypothesis
+	// Логируем результат генерации гипотез
 	if len(resp.AttackVectors) > 0 {
-		mainHypothesis = resp.AttackVectors[0]
-		resp.MainHypothesis = mainHypothesis // Для обратной совместимости
-	} else if resp.Hypothesis != nil {
-		// Старый формат (обратная совместимость)
-		mainHypothesis = resp.Hypothesis
-		resp.AttackVectors = []*models.SecurityHypothesis{resp.Hypothesis}
-		resp.MainHypothesis = resp.Hypothesis
-	}
-
-	if mainHypothesis != nil {
-		g.updateSiteContextWithHypothesis(siteContext, mainHypothesis)
-
+		mainHypothesis := resp.AttackVectors[0]
 		log.Printf(
 			"🎯 Hypotheses generated for %s: %d vectors, main: %s (confidence: %.2f)",
 			host, len(resp.AttackVectors), mainHypothesis.Title, mainHypothesis.Confidence,
@@ -157,25 +145,4 @@ func (g *HypothesisGenerator) validateDataQuality(siteContext *models.SiteContex
 	}
 
 	return nil
-}
-
-// updateSiteContextWithHypothesis обновляет контекст с новой гипотезой
-func (g *HypothesisGenerator) updateSiteContextWithHypothesis(
-	siteContext *models.SiteContext,
-	hypothesis *models.SecurityHypothesis,
-) {
-	// Просто логируем - гипотеза больше не хранится в SiteContext
-	// (убрано MainHypothesis, LastHypothesisUpdate, LastUpdated)
-}
-
-// GetCurrent возвращает текущую гипотезу для хоста (устарело)
-func (g *HypothesisGenerator) GetCurrent(host string) *models.SecurityHypothesis {
-	// Гипотеза больше не хранится в SiteContext
-	return nil
-}
-
-// GetAll возвращает все гипотезы для всех хостов (устарело)
-func (g *HypothesisGenerator) GetAll() map[string]*models.SecurityHypothesis {
-	// Гипотезы больше не хранятся в SiteContext
-	return make(map[string]*models.SecurityHypothesis)
 }

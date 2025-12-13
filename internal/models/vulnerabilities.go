@@ -18,7 +18,7 @@ type SecurityAnalysisResponse struct {
 	AIComment          string              `json:"ai_comment" jsonschema:"description=AI analysis comment and explanation"`
 	SecurityChecklist  []SecurityCheckItem `json:"security_checklist,omitempty" jsonschema:"description=Manual verification checklist for found vulnerabilities"`
 	VulnerabilityTypes []string            `json:"vulnerability_types,omitempty" jsonschema:"description=List of detected vulnerability types"`
-	ConfidenceScore    float64             `json:"confidence_score,omitempty" jsonschema:"description=Confidence in analysis (0.0-1.0)"`
+	ConfidenceScore    float64             `json:"confidence_score,omitempty" jsonschema:"description=Confidence in analysis (0.0-1.0),minimum=0,maximum=1"`
 	ExtractedSecrets   []ExtractedSecret   `json:"extracted_secrets,omitempty" jsonschema:"description=Found secrets and sensitive data"`
 }
 
@@ -34,7 +34,7 @@ type ExtractedSecret struct {
 	Type       string  `json:"type" jsonschema:"description=Type of secret (API key, token, etc.)"`
 	Value      string  `json:"value" jsonschema:"description=Secret value (truncated for security)"`
 	Context    string  `json:"context" jsonschema:"description=Context where secret was found"`
-	Confidence float64 `json:"confidence" jsonschema:"description=Confidence in detection (0.0-1.0)"`
+	Confidence float64 `json:"confidence" jsonschema:"description=Confidence in detection (0.0-1.0),minimum=0,maximum=1"`
 	Location   string  `json:"location" jsonschema:"description=Where the secret was found (request/response)"`
 }
 
@@ -58,21 +58,16 @@ type ExtractedData struct {
 	Comments    []string `json:"comments" jsonschema:"description=HTML comments"`
 }
 
-type DataObject struct {
-	Name   string   `json:"name" jsonschema:"description=The name of the data object (e.g., 'user', 'order')"`
-	Fields []string `json:"fields" jsonschema:"description=A list of fields found for this object (e.g., ['id', 'email', 'role'])"`
-}
-
-// Новые структуры для двухэтапного анализа
+// Структуры для двухэтапного анализа
 
 // URLAnalysisRequest запрос для быстрой оценки URL
 type URLAnalysisRequest struct {
-	NormalizedURL string            `json:"normalized_url" jsonschema:"description=Normalized URL pattern"`
-	Method        string            `json:"method" jsonschema:"description=HTTP method"`
-	Headers       map[string]string `json:"headers" jsonschema:"description=HTTP headers"`
-	ResponseBody  string            `json:"response_body" jsonschema:"description=Response body content"`
-	ContentType   string            `json:"content_type" jsonschema:"description=Response content type"`
-	SiteContext   *SiteContext      `json:"site_context" jsonschema:"description=Current site context"`
+	URL          string            `json:"url" jsonschema:"description=URL to analyze"`
+	Method       string            `json:"method" jsonschema:"description=HTTP method"`
+	Headers      map[string]string `json:"headers" jsonschema:"description=HTTP headers"`
+	ResponseBody string            `json:"response_body" jsonschema:"description=Response body content"`
+	ContentType  string            `json:"content_type" jsonschema:"description=Response content type"`
+	SiteContext  *SiteContext      `json:"site_context" jsonschema:"description=Current site context"`
 }
 
 // URLAnalysisResponse ответ быстрой оценки URL
@@ -92,10 +87,6 @@ type HypothesisRequest struct {
 
 // HypothesisResponse ответ с генерированными гипотезами
 type HypothesisResponse struct {
-	AttackVectors  []*SecurityHypothesis `json:"attack_vectors" jsonschema:"description=List of possible attack vectors sorted by priority"`
-	MainHypothesis *SecurityHypothesis   `json:"main_hypothesis,omitempty" jsonschema:"description=Most likely attack vector (deprecated, use attack_vectors[0])"`
-	Reasoning      string                `json:"reasoning" jsonschema:"description=AI reasoning behind the hypothesis"`
-
-	// Для обратной совместимости
-	Hypothesis *SecurityHypothesis `json:"hypothesis,omitempty" jsonschema:"description=Deprecated: use attack_vectors or main_hypothesis"`
+	AttackVectors []*SecurityHypothesis `json:"attack_vectors" jsonschema:"description=List of possible attack vectors sorted by priority"`
+	Reasoning     string                `json:"reasoning" jsonschema:"description=AI reasoning behind the hypothesis"`
 }

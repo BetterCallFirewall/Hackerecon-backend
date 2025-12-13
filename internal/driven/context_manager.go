@@ -45,10 +45,10 @@ func (m *SiteContextManager) Get(host string) *models.SiteContext {
 // UpdateURLPattern обновляет паттерн URL с новой заметкой
 func (m *SiteContextManager) UpdateURLPattern(
 	siteContext *models.SiteContext,
-	normalizedURL, method string,
+	url, method string,
 	urlNote *models.URLNote,
 ) {
-	patternKey := fmt.Sprintf("%s:%s", method, normalizedURL)
+	patternKey := fmt.Sprintf("%s:%s", method, url)
 
 	var urlPattern *models.URLPattern
 	if existing, exists := siteContext.URLPatterns[patternKey]; exists {
@@ -63,7 +63,7 @@ func (m *SiteContextManager) UpdateURLPattern(
 		urlPattern.Notes = append(urlPattern.Notes, *urlNote)
 	} else {
 		urlPattern = &models.URLPattern{
-			Pattern: normalizedURL,
+			Pattern: url,
 			Method:  method,
 			Notes:   []models.URLNote{*urlNote},
 		}
@@ -74,17 +74,4 @@ func (m *SiteContextManager) UpdateURLPattern(
 	if urlNote.Content != "" {
 		urlPattern.Purpose = urlNote.Content
 	}
-}
-
-// GetAll возвращает все контексты сайтов
-func (m *SiteContextManager) GetAll() map[string]*models.SiteContext {
-	m.mutex.RLock()
-	defer m.mutex.RUnlock()
-
-	result := make(map[string]*models.SiteContext, len(m.contexts))
-	for host, context := range m.contexts {
-		result[host] = context
-	}
-
-	return result
 }

@@ -3,7 +3,6 @@ package utils
 import (
 	"net/http"
 	"strings"
-	"time"
 )
 
 // RequestFilter фильтрует мусорные запросы, которые не нужно анализировать
@@ -16,11 +15,6 @@ type RequestFilter struct {
 
 	// Паттерны для определения бизнес-логики
 	businessLogicPatterns []string
-
-	// Кэш для производительности
-	filterCache map[string]bool
-	cacheExpiry time.Duration
-	lastCleanup time.Time
 }
 
 // NewRequestFilter создает новый фильтр запросов
@@ -51,42 +45,16 @@ func NewRequestFilter() *RequestFilter {
 			"/settings/", "/account/", "/dashboard/", "/panel/", "/manage/",
 			"/create/", "/edit/", "/update/", "/delete/", "/remove/",
 		},
-		filterCache: make(map[string]bool),
-		cacheExpiry: 5 * time.Minute,
-		lastCleanup: time.Now(),
 	}
 }
 
 // ShouldSkipRequestWithReason определяет, нужно ли пропустить анализ и возвращает причину
-func (rf *RequestFilter) ShouldSkipRequestWithReason(req *http.Request, resp *http.Response, contentType string) (
-	bool, string,
-) {
-	url := req.URL.String()
-
-	// Проверяем кэш
-	cacheKey := rf.getCacheKey(req.Method, url, contentType)
-	if cached, exists := rf.filterCache[cacheKey]; exists {
-		return cached, "cached decision"
-	}
-
-	shouldSkip, reason := rf.evaluateSkipRulesWithReason(req, resp, contentType)
-
-	// Кэшируем результат
-	rf.filterCache[cacheKey] = shouldSkip
-
-	// Периодическая очистка кэша
-	if time.Since(rf.lastCleanup) > rf.cacheExpiry {
-		rf.cleanupCache()
-		rf.lastCleanup = time.Now()
-	}
-
-	return shouldSkip, reason
+func (rf *RequestFilter) ShouldSkipRequestWithReason(req *http.Request, resp *http.Response, contentType string) (bool, string) {
+	return rf.evaluateSkipRulesWithReason(req, resp, contentType)
 }
 
 // evaluateSkipRulesWithReason применяет правила фильтрации и возвращает причину
-func (rf *RequestFilter) evaluateSkipRulesWithReason(req *http.Request, resp *http.Response, contentType string) (
-	bool, string,
-) {
+func (rf *RequestFilter) evaluateSkipRulesWithReason(req *http.Request, resp *http.Response, contentType string) (bool, string) {
 	url := req.URL.String()
 	method := req.Method
 
@@ -194,63 +162,4 @@ func (rf *RequestFilter) isKnownStaticFile(url string) bool {
 // isDataModifyingMethod проверяет модифицирует ли метод данные
 func (rf *RequestFilter) isDataModifyingMethod(method string) bool {
 	return method == "POST" || method == "PUT" || method == "PATCH" || method == "DELETE"
-}
-
-// GetFilterStats возвращает статистику фильтрации
-func (rf *RequestFilter) GetFilterStats() map[string]interface{} {
-	total := len(rf.filterCache)
-	skipped := 0
-
-	for _, shouldSkip := range rf.filterCache {
-		if shouldSkip {
-			skipped++
-		}
-	}
-
-	return map[string]interface{}{
-		"total_cached": total,
-		"skipped":      skipped,
-		"analyzed":     total - skipped,
-		"skip_rate":    float64(skipped) / float64(total),
-		"cache_size":   len(rf.filterCache),
-	}
-}
-
-// getCacheKey создает ключ для кэша
-func (rf *RequestFilter) getCacheKey(method, url, contentType string) string {
-	// Нормализуем URL для кэша (убираем query параметры)
-	parts := strings.Split(url, "?")
-	baseURL := parts[0]
-
-	// Нормализуем contentType
-	if idx := strings.Index(contentType, ";"); idx != -1 {
-		contentType = contentType[:idx]
-	}
-
-	return method + ":" + baseURL + ":" + contentType
-}
-
-// cleanupCache очищает устаревшие записи кэша
-func (rf *RequestFilter) cleanupCache() {
-	// Простая реализация - очищаем половину кэша
-	if len(rf.filterCache) > 1000 {
-		newCache := make(map[string]bool)
-		count := 0
-
-		// Оставляем последние записи
-		for key, value := range rf.filterCache {
-			if count < 500 {
-				newCache[key] = value
-				count++
-			}
-		}
-
-		rf.filterCache = newCache
-	}
-}
-
-// ClearCache очищает кэш фильтрации
-func (rf *RequestFilter) ClearCache() {
-	rf.filterCache = make(map[string]bool)
-	rf.lastCleanup = time.Now()
 }

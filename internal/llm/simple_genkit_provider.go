@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/BetterCallFirewall/Hackerecon/internal/config"
 	"github.com/BetterCallFirewall/Hackerecon/internal/models"
@@ -61,6 +62,13 @@ func InitGenkitApp(ctx context.Context, cfg config.LLMConfig) (*genkit.Genkit, e
 	}
 }
 
+// getMiddlewares возвращает стандартный middleware stack для всех LLM запросов
+func getMiddlewares() []ai.ModelMiddleware {
+	return []ai.ModelMiddleware{
+		RetryMiddleware(3, 1*time.Second), // 3 попытки с exponential backoff: 1s → 2s → 4s
+	}
+}
+
 // GenerateSecurityAnalysis выполняет анализ безопасности
 func (p *SimpleGenkitProvider) GenerateSecurityAnalysis(
 	ctx context.Context,
@@ -73,6 +81,7 @@ func (p *SimpleGenkitProvider) GenerateSecurityAnalysis(
 		p.genkitApp,
 		ai.WithModelName(p.modelName),
 		ai.WithPrompt(prompt),
+		ai.WithMiddleware(getMiddlewares()...),
 	)
 
 	if err != nil {
@@ -94,6 +103,7 @@ func (p *SimpleGenkitProvider) GenerateURLAnalysis(
 		p.genkitApp,
 		ai.WithModelName(p.modelName),
 		ai.WithPrompt(prompt),
+		ai.WithMiddleware(getMiddlewares()...),
 	)
 
 	if err != nil {
@@ -115,6 +125,7 @@ func (p *SimpleGenkitProvider) GenerateHypothesis(
 		p.genkitApp,
 		ai.WithModelName(p.modelName),
 		ai.WithPrompt(prompt),
+		ai.WithMiddleware(getMiddlewares()...),
 	)
 
 	if err != nil {

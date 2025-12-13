@@ -67,11 +67,8 @@ func StartAPIServer(analyzer *driven.GenkitSecurityAnalyzer) {
 		dto := models.HypothesisDTO{
 			Type: "hypothesis",
 			Data: &models.HypothesisData{
-				AttackVectors:  hypothesisResp.AttackVectors,
-				MainHypothesis: hypothesisResp.MainHypothesis,
-				TechStack:      techStack,
-				// Старый формат для обратной совместимости
-				Hypothesis: hypothesisResp.MainHypothesis,
+				AttackVectors: hypothesisResp.AttackVectors,
+				TechStack:     techStack,
 			},
 		}
 

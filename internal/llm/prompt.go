@@ -124,7 +124,8 @@ func BuildURLAnalysisPrompt(req *models.URLAnalysisRequest) string {
 	return fmt.Sprintf(
 		`Быстрая оценка endpoint для принятия решения о детальном анализе.
 
-ЗАПРОС: %s %s
+URL: %s
+Метод: %s
 Content-Type: %s
 Response preview: %s
 Известные технологии: %s
@@ -163,8 +164,8 @@ Response preview: %s
 • /static/bundle.js → should_analyze: false, priority: low
 • /admin/users → should_analyze: true, priority: high, vuln_hint: "Админская зона"
 `,
+		req.URL,
 		req.Method,
-		req.NormalizedURL,
 		req.ContentType,
 		responsePreview,
 		techStackInfo,

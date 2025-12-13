@@ -20,10 +20,4 @@ type Provider interface {
 	// GenerateHypothesis - генерация главной гипотезы об уязвимости
 	// Анализирует накопленную информацию о сайте
 	GenerateHypothesis(ctx context.Context, req *models.HypothesisRequest) (*models.HypothesisResponse, error)
-
-	// GetName возвращает название провайдера (для логирования)
-	GetName() string
-
-	// GetModel возвращает используемую модель
-	GetModel() string
 }

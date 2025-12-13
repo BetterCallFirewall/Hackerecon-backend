@@ -33,11 +33,3 @@ func (ps *SecurityProxyWithGenkit) Start() error {
 
 	return ps.server.ListenAndServe()
 }
-
-func (ps *SecurityProxyWithGenkit) Stop() error {
-	if ps.server != nil {
-		log.Printf("🛑 Остановка Security Proxy...")
-		return ps.server.Close()
-	}
-	return nil
-}

@@ -14,7 +14,6 @@ import (
 	"github.com/BetterCallFirewall/Hackerecon/internal/config"
 	"github.com/BetterCallFirewall/Hackerecon/internal/llm"
 	"github.com/BetterCallFirewall/Hackerecon/internal/websocket"
-	"github.com/firebase/genkit/go/genkit"
 )
 
 type SecurityProxyWithGenkit struct {
@@ -22,127 +21,80 @@ type SecurityProxyWithGenkit struct {
 	Analyzer        *GenkitSecurityAnalyzer
 	server          *http.Server
 	burpIntegration *BurpIntegration
-	fallbackMode    bool
 }
 
 func NewSecurityProxyWithGenkit(cfg config.LLMConfig, wsHub *websocket.WebsocketManager) (
 	*SecurityProxyWithGenkit, error,
 ) {
 	ctx := context.Background()
-	var analyzer *GenkitSecurityAnalyzer
-	var err error
 
-	// Определяем формат API
-	var format llm.APIFormat
-	switch cfg.Format {
-	case "ollama":
-		format = llm.FormatOllama
-	case "raw":
-		format = llm.FormatRaw
-	default:
-		format = llm.FormatOpenAI // По умолчанию OpenAI-compatible
+	// Инициализируем Genkit один раз с нужными плагинами
+	genkitApp, err := llm.InitGenkitApp(ctx, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize Genkit: %w", err)
 	}
 
-	// Создаём провайдер
-	provider := llm.NewGenericProvider(
-		llm.GenericConfig{
-			Name:    cfg.Provider,
-			Model:   cfg.Model,
-			BaseURL: cfg.BaseURL,
-			APIKey:  cfg.ApiKey,
-			Format:  format,
-		},
-	)
+	// Создаём провайдер с готовым GenkitApp
+	provider, err := llm.NewProvider(genkitApp, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create LLM provider: %w", err)
+	}
 
-	// Создаём genkitApp для flows
-	genkitApp := genkit.Init(ctx)
-
-	analyzer, err = NewGenkitSecurityAnalyzer(genkitApp, provider, wsHub)
+	// Создаём analyzer с GenkitApp и provider
+	analyzer, err := NewGenkitSecurityAnalyzer(genkitApp, provider, wsHub)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create analyzer: %w", err)
 	}
-	log.Printf("✅ Используется LLM провайдер: %s (модель: %s, формат: %s)", cfg.Provider, cfg.Model, cfg.Format)
+	log.Printf("✅ LLM провайдер: %s (модель: %s)", cfg.Provider, cfg.Model)
 
-	burpIntegration := NewBurpIntegration(cfg.BurpHost, cfg.BurpPort)
-
-	proxy := &SecurityProxyWithGenkit{
+	return &SecurityProxyWithGenkit{
 		port:            cfg.Port,
-		burpIntegration: burpIntegration,
+		burpIntegration: NewBurpIntegration(cfg.BurpHost, cfg.BurpPort),
 		Analyzer:        analyzer,
-		fallbackMode:    !burpIntegration.IsHealthy(),
-	}
-
-	// Запускаем периодическую проверку здоровья Burp
-	if burpIntegration.enabled {
-		proxy.startHealthChecker()
-	}
-
-	return proxy, nil
+	}, nil
 }
 
-// Улучшенная обработка HTTPS туннелирования
+// handleTunneling обрабатывает HTTPS CONNECT запросы
 func (ps *SecurityProxyWithGenkit) handleTunneling(w http.ResponseWriter, r *http.Request) {
-	log.Printf("🔒 HTTPS CONNECT: %s", r.Host)
-
+	// Определяем куда подключаться
 	var destConn net.Conn
 	var err error
-	var routeInfo string
 
-	if ps.burpIntegration.IsHealthy() && !ps.fallbackMode {
-		// Подключение через Burp Suite
-		routeInfo = fmt.Sprintf(
-			"через Burp Suite (%s:%s)",
-			ps.burpIntegration.host, ps.burpIntegration.port,
-		)
-
-		destConn, err = net.DialTimeout(
-			"tcp",
-			ps.burpIntegration.host+":"+ps.burpIntegration.port, 10*time.Second,
-		)
+	if ps.burpIntegration.IsEnabled() {
+		// Через Burp Suite
+		destConn, err = net.DialTimeout("tcp", ps.burpIntegration.host+":"+ps.burpIntegration.port, 10*time.Second)
 		if err != nil {
-			log.Printf("❌ Ошибка подключения к Burp: %v", err)
-			// Переключаемся в fallback режим
-			ps.fallbackMode = true
-		} else {
-			// Отправляем CONNECT запрос к Burp
-			fmt.Fprintf(
-				destConn, "CONNECT %s HTTP/1.1\r\nHost: %s\r\nProxy-Connection: Keep-Alive\r\n\r\n",
-				r.Host, r.Host,
-			)
-
-			// Читаем ответ от Burp
-			resp, err := http.ReadResponse(bufio.NewReader(destConn), r)
-			if err != nil || resp.StatusCode != 200 {
-				log.Printf(
-					"❌ Burp CONNECT failed: status=%d, error=%v",
-					func() int {
-						if resp != nil {
-							return resp.StatusCode
-						} else {
-							return 0
-						}
-					}(), err,
-				)
-				destConn.Close()
-				ps.fallbackMode = true
-				destConn = nil
-			}
-		}
-	}
-
-	// Fallback: прямое подключение
-	if destConn == nil || ps.fallbackMode {
-		routeInfo = "напрямую (Burp недоступен или в fallback режиме)"
-		destConn, err = net.DialTimeout("tcp", r.Host, 10*time.Second)
-		if err != nil {
+			log.Printf("❌ HTTPS CONNECT %s → Burp недоступен: %v", r.Host, err)
 			http.Error(w, err.Error(), http.StatusServiceUnavailable)
 			return
 		}
+
+		// Отправляем CONNECT запрос к Burp
+		fmt.Fprintf(destConn, "CONNECT %s HTTP/1.1\r\nHost: %s\r\n\r\n", r.Host, r.Host)
+
+		// Читаем ответ от Burp
+		resp, err := http.ReadResponse(bufio.NewReader(destConn), r)
+		if err != nil || resp.StatusCode != 200 {
+			log.Printf("❌ Burp CONNECT failed для %s: %v", r.Host, err)
+			destConn.Close()
+			http.Error(w, "Burp CONNECT failed", http.StatusServiceUnavailable)
+			return
+		}
+		log.Printf("🔗 HTTPS %s → %s", r.Host, ps.burpIntegration.GetRouteInfo())
+	} else {
+		// Напрямую
+		destConn, err = net.DialTimeout("tcp", r.Host, 10*time.Second)
+		if err != nil {
+			log.Printf("❌ HTTPS CONNECT %s → %v", r.Host, err)
+			http.Error(w, err.Error(), http.StatusServiceUnavailable)
+			return
+		}
+		log.Printf("🔗 HTTPS %s → напрямую", r.Host)
 	}
 
-	log.Printf("🔗 HTTPS туннель установлен: %s → %s", r.Host, routeInfo)
-
+	// Устанавливаем туннель
 	w.WriteHeader(http.StatusOK)
+
 	hijacker, ok := w.(http.Hijacker)
 	if !ok {
 		http.Error(w, "Hijacking не поддерживается", http.StatusInternalServerError)
@@ -157,6 +109,7 @@ func (ps *SecurityProxyWithGenkit) handleTunneling(w http.ResponseWriter, r *htt
 		return
 	}
 
+	// Двунаправленный копирование данных
 	go ps.transfer(destConn, clientConn)
 	go ps.transfer(clientConn, destConn)
 }
@@ -167,24 +120,7 @@ func (ps *SecurityProxyWithGenkit) transfer(destination io.WriteCloser, source i
 	io.Copy(destination, source)
 }
 
-// getHTTPClientWithInfo возвращает HTTP клиента и информацию о маршруте с учетом fallback логики
-func (ps *SecurityProxyWithGenkit) getHTTPClientWithInfo() (*http.Client, string) {
-	if ps.burpIntegration.IsHealthy() {
-		return ps.burpIntegration.GetClient(), fmt.Sprintf(
-			"через Burp Suite (%s:%s)",
-			ps.burpIntegration.host, ps.burpIntegration.port,
-		)
-	}
-
-	// Fallback mode
-	if !ps.fallbackMode {
-		log.Printf("⚠️ Переключение в fallback режим - Burp недоступен")
-		ps.fallbackMode = true
-	}
-	return http.DefaultClient, "напрямую (Burp недоступен)"
-}
-
-// Исправленная обработка HTTP запросов
+// handleHTTP обрабатывает обычные HTTP запросы
 func (ps *SecurityProxyWithGenkit) handleHTTP(w http.ResponseWriter, req *http.Request) {
 	// Читаем тело запроса для анализа
 	body, err := io.ReadAll(req.Body)
@@ -194,30 +130,19 @@ func (ps *SecurityProxyWithGenkit) handleHTTP(w http.ResponseWriter, req *http.R
 		return
 	}
 
-	// Клонируем запрос для отправки
+	// Создаем прокси запрос
 	outReq := createProxyRequest(req, body)
 
-	// Получаем HTTP клиента с учетом fallback логики
-	client, routeInfo := ps.getHTTPClientWithInfo()
-	log.Printf("🌐 %s %s → %s", outReq.Method, outReq.URL.String(), routeInfo)
+	// Получаем клиент (через Burp или напрямую)
+	client := ps.burpIntegration.GetClient()
+	log.Printf("🌐 %s %s → %s", outReq.Method, outReq.URL.String(), ps.burpIntegration.GetRouteInfo())
 
 	// Отправляем запрос
 	resp, err := client.Do(outReq)
 	if err != nil {
 		log.Printf("❌ Ошибка выполнения запроса: %v", err)
-
-		// Если использовали Burp и получили ошибку, пробуем напрямую
-		if !ps.fallbackMode && ps.burpIntegration.IsHealthy() {
-			log.Printf("🔄 Повторная попытка напрямую...")
-			ps.fallbackMode = true
-			resp, err = http.DefaultClient.Do(outReq)
-		}
-
-		// Если всё равно ошибка - возвращаем её клиенту
-		if err != nil {
-			http.Error(w, fmt.Sprintf("Request failed: %v", err), http.StatusServiceUnavailable)
-			return
-		}
+		http.Error(w, fmt.Sprintf("Request failed: %v", err), http.StatusServiceUnavailable)
+		return
 	}
 	defer resp.Body.Close()
 
@@ -229,10 +154,7 @@ func (ps *SecurityProxyWithGenkit) handleHTTP(w http.ResponseWriter, req *http.R
 		return
 	}
 
-	// Анализируем в отдельной горутине
-	go ps.analyzeTraffic(req, string(body), resp, string(respBody))
-
-	// Возвращаем ответ клиенту (используем простое копирование всех заголовков)
+	// Копируем заголовки ответа
 	for k, vv := range resp.Header {
 		for _, v := range vv {
 			w.Header().Add(k, v)
@@ -240,9 +162,12 @@ func (ps *SecurityProxyWithGenkit) handleHTTP(w http.ResponseWriter, req *http.R
 	}
 	w.WriteHeader(resp.StatusCode)
 	w.Write(respBody)
+
+	// Анализируем трафик в фоне
+	go ps.analyzeTraffic(req, string(body), resp, string(respBody))
 }
 
-// Новая функция для создания правильного прокси запроса
+// createProxyRequest создает правильный прокси запрос
 func createProxyRequest(inReq *http.Request, body []byte) *http.Request {
 	// Создаем новый запрос с правильным URL
 	outReq, err := http.NewRequest(inReq.Method, inReq.URL.String(), strings.NewReader(string(body)))

@@ -10,17 +10,19 @@ import (
 	"time"
 )
 
+// BurpIntegration - упрощенная интеграция с Burp Suite
+// Простой переключатель: либо через Burp, либо напрямую
 type BurpIntegration struct {
-	host        string
-	port        string
-	enabled     bool
-	client      *http.Client
-	healthCheck bool
+	host    string
+	port    string
+	enabled bool
+	client  *http.Client
 }
 
-// NewBurpIntegration создает новую интеграцию с Burp
+// NewBurpIntegration создает интеграцию с Burp
 func NewBurpIntegration(host, port string) *BurpIntegration {
 	if host == "" || port == "" {
+		log.Printf("📡 Burp Suite: выключен (адрес не указан)")
 		return &BurpIntegration{enabled: false}
 	}
 
@@ -30,92 +32,49 @@ func NewBurpIntegration(host, port string) *BurpIntegration {
 		enabled: true,
 	}
 
-	// Создаем HTTP клиент для работы с Burp
 	integration.setupClient()
-
-	// Проверяем доступность Burp
-	integration.healthCheck = integration.checkBurpHealth()
+	log.Printf("📡 Burp Suite: включен (%s:%s)", host, port)
 
 	return integration
 }
 
-// setupClient настраивает HTTP клиент для Burp
+// setupClient настраивает HTTP клиент для проксирования через Burp
 func (bi *BurpIntegration) setupClient() {
-	proxyURL, err := url.Parse(fmt.Sprintf("http://%s:%s", bi.host, bi.port))
-	if err != nil {
-		log.Printf("❌ Ошибка парсинга Burp URL: %v", err)
-		bi.enabled = false
-		return
-	}
-
-	transport := &http.Transport{
-		Proxy: http.ProxyURL(proxyURL),
-		TLSClientConfig: &tls.Config{
-			InsecureSkipVerify: true, // Для работы с Burp CA
-		},
-		DisableKeepAlives: true,
-		DialContext: (&net.Dialer{
-			Timeout:   10 * time.Second,
-			KeepAlive: 0,
-		}).DialContext,
-		IdleConnTimeout:       30 * time.Second,
-		TLSHandshakeTimeout:   10 * time.Second,
-		ExpectContinueTimeout: 1 * time.Second,
-	}
+	proxyURL, _ := url.Parse(fmt.Sprintf("http://%s:%s", bi.host, bi.port))
 
 	bi.client = &http.Client{
-		Transport: transport,
-		Timeout:   30 * time.Second,
+		Transport: &http.Transport{
+			Proxy: http.ProxyURL(proxyURL),
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: true, // Для работы с Burp CA
+			},
+			DialContext: (&net.Dialer{
+				Timeout:   10 * time.Second,
+				KeepAlive: 30 * time.Second,
+			}).DialContext,
+			TLSHandshakeTimeout: 10 * time.Second,
+		},
+		Timeout: 30 * time.Second,
 	}
 }
 
-// GetClient возвращает HTTP клиент для запросов через Burp
+// GetClient возвращает HTTP клиент (через Burp или напрямую)
 func (bi *BurpIntegration) GetClient() *http.Client {
-	if bi.IsHealthy() {
+	if bi.enabled {
 		return bi.client
 	}
 	return http.DefaultClient
 }
 
-// IsHealthy возвращает состояние здоровья Burp интеграции
-func (bi *BurpIntegration) IsHealthy() bool {
-	return bi.enabled && bi.healthCheck
+// GetRouteInfo возвращает информацию о маршруте для логирования
+func (bi *BurpIntegration) GetRouteInfo() string {
+	if bi.enabled {
+		return fmt.Sprintf("через Burp (%s:%s)", bi.host, bi.port)
+	}
+	return "напрямую"
 }
 
-// Периодическая проверка здоровья Burp
-func (ps *SecurityProxyWithGenkit) startHealthChecker() {
-	ticker := time.NewTicker(30 * time.Second)
-	go func() {
-		for range ticker.C {
-			if ps.fallbackMode && ps.burpIntegration.enabled {
-				// Пробуем восстановить подключение к Burp
-				if ps.burpIntegration.checkBurpHealth() {
-					log.Printf("✅ Burp Suite восстановлен, выходим из fallback режима")
-					ps.fallbackMode = false
-					ps.burpIntegration.healthCheck = true
-				}
-			}
-		}
-	}()
-}
-
-// checkBurpHealth проверяет доступность Burp Suite
-func (bi *BurpIntegration) checkBurpHealth() bool {
-	if !bi.enabled {
-		return false
-	}
-
-	log.Printf("🔍 Проверка подключения к Burp Suite %s:%s...", bi.host, bi.port)
-
-	// Проверяем доступность через TCP connect (быстро и надежно)
-	conn, err := net.DialTimeout("tcp", bi.host+":"+bi.port, 5*time.Second)
-	if err != nil {
-		log.Printf("❌ Burp Suite недоступен: %v", err)
-		log.Printf("💡 Убедитесь что Burp запущен и слушает на %s:%s", bi.host, bi.port)
-		return false
-	}
-	conn.Close()
-
-	log.Printf("✅ Burp Suite подключен успешно")
-	return true
+// IsEnabled возвращает статус включения Burp
+func (bi *BurpIntegration) IsEnabled() bool {
+	return bi.enabled
 }

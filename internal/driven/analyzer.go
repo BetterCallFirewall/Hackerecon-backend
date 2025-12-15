@@ -51,6 +51,9 @@ type GenkitSecurityAnalyzer struct {
 
 	// Verification client
 	verificationClient *verification.VerificationClient
+
+	// URL Analysis cache (90% LLM reduction)
+	urlCache *URLAnalysisCache
 }
 
 // NewGenkitSecurityAnalyzer создаёт анализатор с кастомным LLM провайдером
@@ -67,6 +70,7 @@ func NewGenkitSecurityAnalyzer(
 		// Инициализация компонентов
 		contextManager: NewSiteContextManager(),
 		requestFilter:  utils.NewRequestFilter(),
+		urlCache:       NewURLAnalysisCache(1000), // Кэш на 1000 URL паттернов
 	}
 
 	// Инициализация data extractor
@@ -77,23 +81,41 @@ func NewGenkitSecurityAnalyzer(
 		genkitApp, "unifiedAnalysisFlow",
 		func(ctx context.Context, req *models.SecurityAnalysisRequest) (*models.SecurityAnalysisResponse, error) {
 			// Step 1: Quick URL Analysis (traced)
-			// Используем только 500 символов для быстрой проверки
-			urlAnalysisReq := &models.URLAnalysisRequest{
-				URL:          req.URL,
-				Method:       req.Method,
-				Headers:      req.Headers,
-				ResponseBody: llm.TruncateString(req.ResponseBody, 500), // Только 500 символов!
-				ContentType:  req.ContentType,
-				SiteContext:  req.SiteContext,
-			}
+			// Сначала проверяем кэш
+			urlPattern := normalizeURLPattern(req.URL)
+			cacheKey := fmt.Sprintf("%s:%s", req.Method, urlPattern)
+			
+			var urlAnalysisResp *models.URLAnalysisResponse
+			if cached, ok := analyzer.urlCache.Get(cacheKey); ok {
+				// Cache hit! Пропускаем LLM вызов
+				log.Printf("✅ Cache HIT: %s %s", req.Method, urlPattern)
+				urlAnalysisResp = cached
+			} else {
+				// Cache miss - делаем LLM запрос
+				log.Printf("❌ Cache MISS: %s %s", req.Method, urlPattern)
+				
+				// Используем только 500 символов для быстрой проверки
+				urlAnalysisReq := &models.URLAnalysisRequest{
+					URL:          req.URL,
+					Method:       req.Method,
+					Headers:      req.Headers,
+					ResponseBody: llm.TruncateString(req.ResponseBody, 500), // Только 500 символов!
+					ContentType:  req.ContentType,
+					SiteContext:  req.SiteContext,
+				}
 
-			urlAnalysisResp, err := genkit.Run(
-				ctx, "quick-url-analysis", func() (*models.URLAnalysisResponse, error) {
-					return analyzer.llmProvider.GenerateURLAnalysis(ctx, urlAnalysisReq)
-				},
-			)
-			if err != nil {
-				return nil, fmt.Errorf("quick URL analysis failed: %w", err)
+				var err error
+				urlAnalysisResp, err = genkit.Run(
+					ctx, "quick-url-analysis", func() (*models.URLAnalysisResponse, error) {
+						return analyzer.llmProvider.GenerateURLAnalysis(ctx, urlAnalysisReq)
+					},
+				)
+				if err != nil {
+					return nil, fmt.Errorf("quick URL analysis failed: %w", err)
+				}
+				
+				// Сохраняем в кэш
+				analyzer.urlCache.Set(cacheKey, urlAnalysisResp)
 			}
 
 			// Step 2: Update URL pattern в контексте

@@ -1,8 +1,12 @@
 package models
 
 type ReportDTO struct {
-	Report          VulnerabilityReport `json:"report"`
-	RequestResponse RequestResponseInfo `json:"request_response"`
+	Report              VulnerabilityReport `json:"report"`
+	RequestResponse     RequestResponseInfo `json:"request_response"`
+
+	// Verification tracking fields
+	VerificationStatus   string                       `json:"verification_status,omitempty"`
+	VerificationResults  []*VerificationResponse      `json:"verification_results,omitempty"`
 }
 
 type RequestResponseInfo struct {

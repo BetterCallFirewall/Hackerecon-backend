@@ -249,24 +249,151 @@ func (analyzer *GenkitSecurityAnalyzer) broadcastAnalysisResult(
 		log.Printf("💡 AI Комментарий: %s", result.AIComment)
 	}
 
-	// Отправляем результат в WebSocket
-	analyzer.WsHub.Broadcast(
-		models.ReportDTO{
-			Report: models.VulnerabilityReport{
-				ID:             uuid.New().String(),
-				AnalysisResult: *result,
-			},
-			RequestResponse: models.RequestResponseInfo{
-				URL:         req.URL.String(),
-				Method:      req.Method,
-				StatusCode:  resp.StatusCode,
-				ReqHeaders:  convertHeaders(req.Header),
-				RespHeaders: convertHeaders(resp.Header),
-				ReqBody:     llm.TruncateString(reqBody, maxContentSizeForLLM),
-				RespBody:    llm.TruncateString(respBody, maxContentSizeForLLM),
-			},
+	// Convert request info
+	requestInfo := models.RequestResponseInfo{
+		URL:         req.URL.String(),
+		Method:      req.Method,
+		StatusCode:  resp.StatusCode,
+		ReqHeaders:  convertHeaders(req.Header),
+		RespHeaders: convertHeaders(resp.Header),
+		ReqBody:     llm.TruncateString(reqBody, maxContentSizeForLLM),
+		RespBody:    llm.TruncateString(respBody, maxContentSizeForLLM),
+	}
+
+	// Broadcast initial result immediately (fast response)
+	reportID := uuid.New().String()
+	analyzer.WsHub.Broadcast(models.ReportDTO{
+		Report: models.VulnerabilityReport{
+			ID:             reportID,
+			Timestamp:      time.Now(),
+			AnalysisResult: *result,
 		},
-	)
+		RequestResponse:    requestInfo,
+		VerificationStatus: "in_progress", // NEW: track verification progress
+	})
+
+	// Start background verification if there are checklist items
+	if result.HasVulnerability && len(result.SecurityChecklist) > 0 {
+		go analyzer.verifyChecklistInBackground(reportID, result, requestInfo)
+	}
+}
+
+// verifyChecklistInBackground performs async verification of security checklist items
+func (analyzer *GenkitSecurityAnalyzer) verifyChecklistInBackground(
+	reportID string,
+	result *models.SecurityAnalysisResponse,
+	requestInfo models.RequestResponseInfo,
+) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	log.Printf("🔬 Starting background verification for %d checklist items", len(result.SecurityChecklist))
+
+	// Verify each checklist item
+	verificationResults := make([]*models.VerificationResponse, len(result.SecurityChecklist))
+
+	for i, item := range result.SecurityChecklist {
+		// Ensure hypothesis is set for verification
+		if item.Hypothesis == "" {
+			item.Hypothesis = item.Action + " - " + item.Description
+		}
+
+		// Create verification request
+		verificationReq := &models.VerificationRequest{
+			OriginalRequest: requestInfo,
+			ChecklistItem:   item,
+			MaxAttempts:     3,
+		}
+
+		// Execute verification flow
+		verificationResult, err := genkit.Run(
+			ctx, "verification", func() (*models.VerificationResponse, error) {
+				return analyzer.verifyHypothesis(ctx, verificationReq)
+			},
+		)
+		if err != nil {
+			log.Printf("❌ Verification failed for item %d: %v", i, err)
+
+			// Create fallback result
+			verificationResult = &models.VerificationResponse{
+				OriginalIndex:     i,
+				Status:            "inconclusive",
+				UpdatedConfidence: item.ConfidenceScore,
+				Reasoning:         fmt.Sprintf("Verification failed: %v", err),
+			}
+		}
+
+		verificationResult.OriginalIndex = i
+		verificationResults[i] = verificationResult
+
+		log.Printf("📋 Item %d verification completed: %s (confidence: %.2f)",
+			i, verificationResult.Status, verificationResult.UpdatedConfidence)
+	}
+
+	// Update checklist with verification results
+	updatedChecklist := analyzer.applyVerificationResults(result.SecurityChecklist, verificationResults)
+
+	// Update result
+	result.SecurityChecklist = updatedChecklist
+	result.ConfidenceScore = analyzer.calculateOverallConfidence(verificationResults)
+
+	log.Printf("✅ All verifications completed. Overall confidence: %.2f", result.ConfidenceScore)
+
+	// Broadcast updated result
+	analyzer.WsHub.Broadcast(models.ReportDTO{
+		Report: models.VulnerabilityReport{
+			ID:             reportID,
+			Timestamp:      time.Now(),
+			AnalysisResult: *result,
+		},
+		RequestResponse:     requestInfo,
+		VerificationStatus:  "completed",
+		VerificationResults: verificationResults, // NEW: include detailed verification results
+	})
+}
+
+// applyVerificationResults updates checklist items with verification results
+func (analyzer *GenkitSecurityAnalyzer) applyVerificationResults(
+	original []models.SecurityCheckItem,
+	results []*models.VerificationResponse,
+) []models.SecurityCheckItem {
+
+	updated := make([]models.SecurityCheckItem, len(original))
+
+	for i, item := range original {
+		if i < len(results) {
+			result := results[i]
+
+			// Create copy of original item
+			updatedItem := item
+
+			// Update with verification results
+			updatedItem.VerificationStatus = result.Status
+			updatedItem.ConfidenceScore = result.UpdatedConfidence
+			updatedItem.VerificationReason = result.Reasoning
+			updatedItem.RecommendedPOC = result.RecommendedPOC
+
+			updated[i] = updatedItem
+		} else {
+			updated[i] = item
+		}
+	}
+
+	return updated
+}
+
+// calculateOverallConfidence calculates overall confidence from verification results
+func (analyzer *GenkitSecurityAnalyzer) calculateOverallConfidence(results []*models.VerificationResponse) float64 {
+	if len(results) == 0 {
+		return 0.5
+	}
+
+	total := 0.0
+	for _, result := range results {
+		total += result.UpdatedConfidence
+	}
+
+	return total / float64(len(results))
 }
 
 // getOrCreateSiteContext получает или создает контекст для хоста.

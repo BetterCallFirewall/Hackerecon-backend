@@ -42,7 +42,7 @@ func (e *DataExtractor) ExtractFromContent(reqBody, respBody, contentType string
 
 		// Анализируем только HTML контент для form actions и комментариев
 		if e.isHTMLContent(content, contentType) {
-			e.extractHTMLData(content, extractedData)
+			e.extractHTMLData(content, &extractedData)
 		}
 	}
 
@@ -57,7 +57,7 @@ func (e *DataExtractor) isHTMLContent(content, contentType string) bool {
 }
 
 // extractHTMLData извлекает данные из HTML напрямую в extractedData
-func (e *DataExtractor) extractHTMLData(content string, data models.ExtractedData) {
+func (e *DataExtractor) extractHTMLData(content string, data *models.ExtractedData) {
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(content))
 	if err != nil {
 		return

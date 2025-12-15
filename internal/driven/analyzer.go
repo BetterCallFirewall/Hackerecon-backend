@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -19,13 +18,6 @@ import (
 	genkitcore "github.com/firebase/genkit/go/core"
 	"github.com/firebase/genkit/go/genkit"
 	"github.com/google/uuid"
-)
-
-// Пакет-уровневые паттерны для оптимизации hot path
-// Компилируются один раз при запуске программы
-var (
-	// whitespaceRegex - паттерн для замены множественных пробелов на один
-	whitespaceRegex = regexp.MustCompile(`\s+`)
 )
 
 // GenkitSecurityAnalyzer анализирует HTTP трафик на наличие уязвимостей безопасности
@@ -463,7 +455,7 @@ func (analyzer *GenkitSecurityAnalyzer) prepareContentForLLM(content, contentTyp
 			// Возвращаем только текст из body
 			textContent := doc.Find("body").Text()
 			// Заменяем множественные пробелы и переносы строк на один пробел
-			textContent = whitespaceRegex.ReplaceAllString(textContent, " ")
+			textContent = strings.Join(strings.Fields(textContent), " ")
 			return llm.TruncateString("HTML Text Content: "+textContent, 2000) // Ограничиваем до 2000 символов
 		}
 	}

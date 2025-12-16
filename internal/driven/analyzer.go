@@ -76,7 +76,7 @@ func NewGenkitSecurityAnalyzer(
 			// Сначала проверяем кэш
 			urlPattern := normalizeURLPattern(req.URL)
 			cacheKey := fmt.Sprintf("%s:%s", req.Method, urlPattern)
-			
+
 			var urlAnalysisResp *models.URLAnalysisResponse
 			if cached, ok := analyzer.urlCache.Get(cacheKey); ok {
 				// Cache hit! Пропускаем LLM вызов
@@ -85,7 +85,7 @@ func NewGenkitSecurityAnalyzer(
 			} else {
 				// Cache miss - делаем LLM запрос
 				log.Printf("❌ Cache MISS: %s %s", req.Method, urlPattern)
-				
+
 				// Используем только 500 символов для быстрой проверки
 				urlAnalysisReq := &models.URLAnalysisRequest{
 					URL:          req.URL,
@@ -105,7 +105,7 @@ func NewGenkitSecurityAnalyzer(
 				if err != nil {
 					return nil, fmt.Errorf("quick URL analysis failed: %w", err)
 				}
-				
+
 				// Сохраняем в кэш
 				analyzer.urlCache.Set(cacheKey, urlAnalysisResp)
 			}
@@ -352,9 +352,6 @@ func (analyzer *GenkitSecurityAnalyzer) verifyAndFilterChecklist(
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			// Generate hypothesis on the fly
-			hypothesis := itm.Action + " - " + itm.Description
-
 			// Create verification request
 			verificationReq := &models.VerificationRequest{
 				OriginalRequest: requestInfo,
@@ -362,12 +359,8 @@ func (analyzer *GenkitSecurityAnalyzer) verifyAndFilterChecklist(
 				MaxAttempts:     3,
 			}
 
-			// Execute verification
-			verificationRes, err := genkit.Run(
-				ctx, "verification", func() (*models.VerificationResponse, error) {
-					return analyzer.verifyHypothesis(ctx, verificationReq, hypothesis)
-				},
-			)
+			// Execute verification using flow
+			verificationRes, err := analyzer.verificationFlow.Run(ctx, verificationReq)
 
 			resultsChan <- verificationResult{
 				index:  idx,

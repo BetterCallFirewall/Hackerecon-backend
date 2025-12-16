@@ -484,7 +484,6 @@ func BuildVerificationAnalysisPrompt(req *models.VerificationAnalysisRequest) st
   "status": "verified|likely_false|inconclusive|manual_check",
   "updated_confidence": 0.0-1.0,
   "reasoning": "детальный анализ почему сделан такой вывод",
-  "evidence": ["ключевые доказательства из ответов"],
   "recommended_poc": "конкретный POC для ручной проверки если нужно"
 }
 

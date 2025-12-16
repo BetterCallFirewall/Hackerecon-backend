@@ -20,4 +20,12 @@ type Provider interface {
 	// GenerateHypothesis - генерация главной гипотезы об уязвимости
 	// Анализирует накопленную информацию о сайте
 	GenerateHypothesis(ctx context.Context, req *models.HypothesisRequest) (*models.HypothesisResponse, error)
+
+	// GenerateVerificationPlan - генерация плана верификации гипотезы
+	// Создает тестовые запросы для проверки гипотезы об уязвимости
+	GenerateVerificationPlan(ctx context.Context, req *models.VerificationPlanRequest) (*models.VerificationPlanResponse, error)
+
+	// AnalyzeVerificationResults - анализ результатов верификации
+	// Определяет статус верификации на основе выполненных тестов
+	AnalyzeVerificationResults(ctx context.Context, req *models.VerificationAnalysisRequest) (*models.VerificationAnalysisResponse, error)
 }

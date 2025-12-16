@@ -134,3 +134,47 @@ func (p *SimpleGenkitProvider) GenerateHypothesis(
 
 	return result, nil
 }
+
+// GenerateVerificationPlan генерирует план верификации гипотезы
+func (p *SimpleGenkitProvider) GenerateVerificationPlan(
+	ctx context.Context,
+	req *models.VerificationPlanRequest,
+) (*models.VerificationPlanResponse, error) {
+	prompt := BuildVerificationPlanPrompt(req)
+
+	result, _, err := genkit.GenerateData[models.VerificationPlanResponse](
+		ctx,
+		p.genkitApp,
+		ai.WithModelName(p.modelName),
+		ai.WithPrompt(prompt),
+		ai.WithMiddleware(getMiddlewares()...),
+	)
+
+	if err != nil {
+		return nil, fmt.Errorf("verification plan generation failed: %w", err)
+	}
+
+	return result, nil
+}
+
+// AnalyzeVerificationResults анализирует результаты верификации
+func (p *SimpleGenkitProvider) AnalyzeVerificationResults(
+	ctx context.Context,
+	req *models.VerificationAnalysisRequest,
+) (*models.VerificationAnalysisResponse, error) {
+	prompt := BuildVerificationAnalysisPrompt(req)
+
+	result, _, err := genkit.GenerateData[models.VerificationAnalysisResponse](
+		ctx,
+		p.genkitApp,
+		ai.WithModelName(p.modelName),
+		ai.WithPrompt(prompt),
+		ai.WithMiddleware(getMiddlewares()...),
+	)
+
+	if err != nil {
+		return nil, fmt.Errorf("verification analysis failed: %w", err)
+	}
+
+	return result, nil
+}

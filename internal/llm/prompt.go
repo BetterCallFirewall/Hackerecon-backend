@@ -403,3 +403,93 @@ func formatSuspiciousPatterns(patterns []*models.URLPattern) string {
 }
 
 // Вспомогательные функции удалены (formatTechList, formatTechStackCompact) - больше не нужны
+
+// BuildVerificationPlanPrompt создает промпт для генерации плана верификации
+func BuildVerificationPlanPrompt(req *models.VerificationPlanRequest) string {
+	return fmt.Sprintf(`Ты - эксперт по безопасности веб-приложений. Твоя задача создать детальный план верификации гипотезы об уязвимости.
+
+ГИПОТЕЗА:
+%s
+
+ОРИГИНАЛЬНЫЙ ЗАПРОС:
+URL: %s
+Метод: %s
+Status: %d
+
+КОНТЕКСТ:
+%s
+
+ЗАДАЧА:
+Создай план верификации этой гипотезы через безопасные GET запросы.
+
+ПРАВИЛА:
+1. Только GET запросы (никаких POST/PUT/DELETE)
+2. Максимально %d попыток проверки
+3. Создай конкретные URL с тестовыми параметрами
+4. Объясни логику каждого теста
+
+ФОРМАТ ОТВЕТА:
+{
+  "test_requests": [
+    {
+      "url": "конкретный URL для проверки",
+      "method": "GET",
+      "headers": {"Header-Name": "Header-Value"},
+      "body": "",
+      "purpose": "что этот запрос проверяет"
+    }
+  ],
+  "reasoning": "объяснение логики проверки и почему выбраны такие запросы"
+}
+
+ОТВЕТ В JSON:`,
+		req.Hypothesis,
+		req.TargetURL,
+		req.OriginalRequest.Method,
+		req.OriginalRequest.StatusCode,
+		req.AdditionalInfo,
+		req.MaxAttempts,
+	)
+}
+
+// BuildVerificationAnalysisPrompt создает промпт для анализа результатов верификации
+func BuildVerificationAnalysisPrompt(req *models.VerificationAnalysisRequest) string {
+	resultsJSON, _ := json.MarshalIndent(req.TestResults, "", "  ")
+
+	return fmt.Sprintf(`Ты - эксперт по безопасности. Проанализируй результаты верификации гипотезы.
+
+ИСХОДНАЯ ГИПОТЕЗА:
+%s
+
+ИСХОДНАЯ УВЕРЕННОСТЬ: %.2f
+
+РЕЗУЛЬТАТЫ ПРОВЕРОК:
+%s
+
+АНАЛИЗ:
+На основе ответов сервера определи:
+
+1. **Подтверждена ли уязвимость** (разные ответы показывают уязвимость)
+2. **Скорее ложный срабатывание** (все ответы одинаковые и безопасные)
+3. **Недостаточно данных** (нельзя определить из GET запросов)
+
+КРИТЕРИИ АНАЛИЗА:
+- Разные status codes = возможно уязвимо
+- Разные размеры ответов = возможно уязвимо
+- Разное содержимое = скорее уязвимо
+- Одинаковые ответы = скорее безопасно
+
+ФОРМАТ ОТВЕТА:
+{
+  "status": "verified|likely_false|inconclusive|manual_check",
+  "updated_confidence": 0.0-1.0,
+  "reasoning": "детальный анализ почему сделан такой вывод",
+  "recommended_poc": "конкретный POC для ручной проверки если нужно"
+}
+
+ОТВЕТ В JSON:`,
+		req.Hypothesis,
+		req.OriginalConfidence,
+		string(resultsJSON),
+	)
+}

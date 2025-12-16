@@ -433,12 +433,13 @@ Status: %d
   "test_requests": [
     {
       "url": "конкретный URL для проверки",
-      "description": "что этот запрос проверяет",
-      "expected_behavior": "что должно произойти если уязвимость есть"
+      "method": "GET",
+      "headers": {"Header-Name": "Header-Value"},
+      "body": "",
+      "purpose": "что этот запрос проверяет"
     }
   ],
-  "verification_logic": "общая логика верификации",
-  "risk_level": "low|medium|high"
+  "reasoning": "объяснение логики проверки и почему выбраны такие запросы"
 }
 
 ОТВЕТ В JSON:`,

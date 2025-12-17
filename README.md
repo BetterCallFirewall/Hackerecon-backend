@@ -1,6 +1,6 @@
 # 🛡️ Hackerecon
 
-**Frontend** - https://github.com/Wolfsanek2/Hackerecon-frontend
+**Frontend** - [Frontend](https://github.com/BetterCallFirewall/Hackerecon-frontend)
 
 **AI-Powered HTTP Proxy для автоматизированного анализа безопасности веб-приложений**
 

@@ -9,6 +9,11 @@ import (
 	"github.com/firebase/genkit/go/ai"
 )
 
+// NOTE: Для просмотра LLM запросов/ответов используй GenKit DevUI!
+// Запусти: genkit start -- go run cmd/main.go
+// Затем открой: http://localhost:4000
+// Там увидишь все flow executions, traces, входные/выходные данные
+
 // RetryMiddleware создает middleware для автоматического retry при ошибках
 func RetryMiddleware(maxAttempts int, initialDelay time.Duration) ai.ModelMiddleware {
 	return func(next ai.ModelFunc) ai.ModelFunc {

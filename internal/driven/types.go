@@ -14,5 +14,5 @@ const (
 	defaultAnalysisTimeout = 60 * time.Second
 
 	// Site context requirements
-	minURLPatternsForHypothesis = 3
+	minURLPatternsForHypothesis = 2
 )

@@ -28,4 +28,8 @@ type Provider interface {
 	// AnalyzeVerificationResults - анализ результатов верификации
 	// Определяет статус верификации на основе выполненных тестов
 	AnalyzeVerificationResults(ctx context.Context, req *models.VerificationAnalysisRequest) (*models.VerificationAnalysisResponse, error)
+
+	// AnalyzeBatchVerification - батч-анализ нескольких findings одновременно
+	// Оптимизирует количество LLM запросов проверяя все findings за один вызов
+	AnalyzeBatchVerification(ctx context.Context, req *models.BatchVerificationRequest) (*models.BatchVerificationResult, error)
 }

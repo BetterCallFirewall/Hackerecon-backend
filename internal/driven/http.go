@@ -203,7 +203,8 @@ func (ps *SecurityProxyWithGenkit) analyzeTraffic(
 	contentType := resp.Header.Get("Content-Type")
 
 	// Фильтрация выполняется в Analyzer через RequestFilter
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	// INCREASED: 30s → 120s для сложных анализов с retry
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
 	err := ps.Analyzer.AnalyzeHTTPTraffic(ctx, req, resp, reqBody, respBody, contentType)

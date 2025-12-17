@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/BetterCallFirewall/Hackerecon/internal/config"
@@ -85,7 +86,11 @@ func (p *SimpleGenkitProvider) GenerateSecurityAnalysis(
 	)
 
 	if err != nil {
-		return nil, fmt.Errorf("security analysis failed: %w", err)
+		// Логируем детали для отладки JSON parsing errors
+		log.Printf("⚠️ SecurityAnalysis failed for URL: %s", req.URL)
+		log.Printf("⚠️ Error details: %v", err)
+		// Возвращаем более информативное сообщение
+		return nil, fmt.Errorf("security analysis failed (check LLM logs above): %w", err)
 	}
 
 	return result, nil

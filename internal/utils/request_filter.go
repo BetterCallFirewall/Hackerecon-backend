@@ -7,8 +7,8 @@ import (
 
 // RequestFilter фильтрует мусорные запросы, которые не нужно анализировать
 type RequestFilter struct {
-	// Списки исключений
-	staticExtensions     []string
+	// Maps для O(1) lookup (оптимизация)
+	staticExtensions     map[string]struct{}
 	analyticsPaths       []string
 	staticPaths          []string
 	contentTypeBlacklist []string
@@ -19,12 +19,19 @@ type RequestFilter struct {
 
 // NewRequestFilter создает новый фильтр запросов
 func NewRequestFilter() *RequestFilter {
+	// OPTIMIZATION: Use map for O(1) extension lookup instead of O(n) slice iteration
+	extensionsMap := make(map[string]struct{})
+	extensions := []string{
+		"css", "js", "png", "jpg", "jpeg", "gif", "ico", "svg", "woff", "woff2", "ttf", "eot",
+		"pdf", "doc", "docx", "xls", "xlsx", "zip", "rar", "tar", "gz",
+		"mp3", "mp4", "avi", "mov", "wmv", "flv",
+	}
+	for _, ext := range extensions {
+		extensionsMap[ext] = struct{}{}
+	}
+
 	return &RequestFilter{
-		staticExtensions: []string{
-			"css", "js", "png", "jpg", "jpeg", "gif", "ico", "svg", "woff", "woff2", "ttf", "eot",
-			"pdf", "doc", "docx", "xls", "xlsx", "zip", "rar", "tar", "gz",
-			"mp3", "mp4", "avi", "mov", "wmv", "flv",
-		},
+		staticExtensions: extensionsMap,
 		analyticsPaths: []string{
 			"/analytics", "/metrics", "/ga.js", "/gtag.js", "/pixel",
 			"/tracking", "/beacon", "/stats", "/counter",
@@ -58,9 +65,11 @@ func (rf *RequestFilter) evaluateSkipRulesWithReason(req *http.Request, resp *ht
 	url := req.URL.String()
 	method := req.Method
 
-	// 1. Статические файлы по расширению
-	for _, ext := range rf.staticExtensions {
-		if strings.HasSuffix(strings.ToLower(url), "."+ext) {
+	// 1. Статические файлы по расширению - OPTIMIZED: O(1) map lookup
+	urlLower := strings.ToLower(url)
+	if lastDot := strings.LastIndex(urlLower, "."); lastDot != -1 {
+		ext := urlLower[lastDot+1:]
+		if _, isStatic := rf.staticExtensions[ext]; isStatic {
 			return true, "static file extension: ." + ext
 		}
 	}

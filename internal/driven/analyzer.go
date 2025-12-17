@@ -291,9 +291,17 @@ func (analyzer *GenkitSecurityAnalyzer) AnalyzeHTTPTraffic(
 
 	// Ленивая подготовка: минимум для Quick Analysis
 	analysisReq := &models.SecurityAnalysisRequest{
-		URL:          req.URL.String(),
-		Method:       req.Method,
-		Headers:      convertHeaders(req.Header),
+		URL:    req.URL.String(),
+		Method: req.Method,
+		Headers: func() map[string]string {
+			headers := make(map[string]string)
+			for k, v := range req.Header {
+				if len(v) > 0 {
+					headers[k] = v[0]
+				}
+			}
+			return headers
+		}(),
 		RequestBody:  reqBody,  // Храним raw для полного анализа
 		ResponseBody: respBody, // Храним raw для полного анализа
 		ContentType:  contentType,
@@ -345,13 +353,29 @@ func (analyzer *GenkitSecurityAnalyzer) broadcastAnalysisResult(
 
 	// Convert request info
 	requestInfo := models.RequestResponseInfo{
-		URL:         req.URL.String(),
-		Method:      req.Method,
-		StatusCode:  resp.StatusCode,
-		ReqHeaders:  convertHeaders(req.Header),
-		RespHeaders: convertHeaders(resp.Header),
-		ReqBody:     llm.TruncateString(reqBody, maxContentSizeForLLM),
-		RespBody:    llm.TruncateString(respBody, maxContentSizeForLLM),
+		URL:        req.URL.String(),
+		Method:     req.Method,
+		StatusCode: resp.StatusCode,
+		ReqHeaders: func() map[string]string {
+			headers := make(map[string]string)
+			for k, v := range req.Header {
+				if len(v) > 0 {
+					headers[k] = v[0]
+				}
+			}
+			return headers
+		}(),
+		RespHeaders: func() map[string]string {
+			headers := make(map[string]string)
+			for k, v := range resp.Header {
+				if len(v) > 0 {
+					headers[k] = v[0]
+				}
+			}
+			return headers
+		}(),
+		ReqBody:  llm.TruncateString(reqBody, maxContentSizeForLLM),
+		RespBody: llm.TruncateString(respBody, maxContentSizeForLLM),
 	}
 
 	// Run parallel verification for findings
@@ -411,144 +435,6 @@ func (analyzer *GenkitSecurityAnalyzer) broadcastAnalysisResult(
 	)
 }
 
-// verifyFindingsParallel DEPRECATED: This function has been replaced by verifyFindingsBatch.
-// The new batch verification approach reduces LLM calls from N to 1 per batch,
-// achieving 5x speedup (15-20s → 3-5s) with 80% fewer LLM calls.
-// This function is kept for reference but should not be used.
-// See verifyFindingsBatch() for the optimized implementation.
-func (analyzer *GenkitSecurityAnalyzer) verifyFindingsParallel(
-	findings []models.Finding,
-	requestInfo models.RequestResponseInfo,
-	siteContext *models.SiteContext,
-) {
-	if len(findings) == 0 {
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	defer cancel()
-
-	// Track metrics for heuristic analysis
-	heuristicDecisions := 0
-	llmCallsNeeded := 0
-
-	// Parallel verification with max 3 concurrent
-	maxConcurrent := 3
-	sem := make(chan struct{}, maxConcurrent)
-	var wg sync.WaitGroup
-
-	for i := range findings {
-		wg.Add(1)
-		go func(finding *models.Finding) {
-			defer wg.Done()
-
-			// Acquire semaphore slot
-			sem <- struct{}{}
-			defer func() { <-sem }()
-
-			// PHASE 1: Quick heuristic analysis BEFORE LLM
-			// Skip if obviously redundant (identical request)
-			if len(finding.TestRequests) > 0 && finding.TestRequests[0].URL != "" {
-				originalReq := &models.RequestData{
-					Method: requestInfo.Method,
-					URL:    requestInfo.URL,
-					Body:   requestInfo.ReqBody,
-				}
-
-				if utils.ShouldSkipVerification(finding, originalReq) {
-					finding.VerificationStatus = "likely_false"
-					finding.VerificationReason = "Heuristic: Test request identical to original or low-priority"
-					log.Printf("⚡ Heuristic SKIP: %s", finding.Title)
-					heuristicDecisions++
-					return
-				}
-			}
-
-			// Execute test request (use first test request for simple verification)
-			var testResult *models.TestResult
-			if len(finding.TestRequests) > 0 {
-				testResult = analyzer.executeTestRequest(ctx, finding.TestRequests[0], requestInfo)
-			}
-			if testResult == nil {
-				finding.VerificationStatus = "inconclusive"
-				finding.VerificationReason = "Failed to execute test request"
-				log.Printf("❌ Test execution failed: %s", finding.Title)
-				return
-			}
-
-			// Try heuristic analysis first
-			originalResp := &models.ResponseData{
-				StatusCode: requestInfo.StatusCode,
-				Body:       requestInfo.RespBody,
-			}
-
-			status, confidence, reason := utils.QuickHeuristicAnalysis(finding, testResult, originalResp)
-
-			if status != "needs_llm" {
-				// Heuristic made decision!
-				finding.VerificationStatus = status
-				finding.VerificationReason = fmt.Sprintf("Heuristic (%.0f%% confidence): %s", confidence*100, reason)
-				log.Printf("⚡ Heuristic HIT (%.0f%%): %s - %s", confidence*100, finding.Title, status)
-				heuristicDecisions++
-				return
-			}
-
-			// PHASE 2: LLM verification (only if heuristic couldn't decide)
-			llmCallsNeeded++
-			log.Printf("🤖 LLM needed: %s", finding.Title)
-
-			// Create verification request from finding
-			verificationReq := &models.VerificationRequest{
-				OriginalRequest: requestInfo,
-				ChecklistItem: models.SecurityCheckItem{
-					Action:      finding.Title,
-					Description: finding.Observation,
-					Expected:    finding.ExpectedIfVulnerable,
-				},
-				MaxAttempts: 2,
-			}
-
-			// Execute verification using flow
-			verificationRes, err := analyzer.verificationFlow.Run(ctx, verificationReq)
-
-			if err != nil {
-				log.Printf("❌ Verification failed for finding '%s': %v", finding.Title, err)
-				finding.VerificationStatus = "inconclusive"
-				finding.VerificationReason = fmt.Sprintf("Verification failed: %v", err)
-				return
-			}
-
-			// Update finding with verification results
-			finding.VerificationStatus = verificationRes.Status
-			finding.VerificationReason = verificationRes.Reasoning
-
-			log.Printf("📋 Finding '%s' - Status: %s", finding.Title, verificationRes.Status)
-
-			// Mark low confidence findings as likely_false
-			if verificationRes.UpdatedConfidence < 0.3 && verificationRes.Status != "verified" {
-				finding.VerificationStatus = "likely_false"
-				log.Printf(
-					"🔴 Low confidence (%.2f), marking as likely false: %s",
-					verificationRes.UpdatedConfidence, finding.Title,
-				)
-			}
-		}(&findings[i])
-	}
-
-	wg.Wait()
-
-	// Log metrics
-	total := len(findings)
-	log.Printf(
-		"📊 Verification Metrics: total=%d, heuristic=%d (%.0f%%), llm=%d (%.0f%%)",
-		total, heuristicDecisions, float64(heuristicDecisions)/float64(total)*100,
-		llmCallsNeeded, float64(llmCallsNeeded)/float64(total)*100,
-	)
-
-	// PHASE 3: Update SiteContext with verification results
-	analyzer.updateSiteContextWithVerification(siteContext, findings)
-}
-
 // verifyFindingsBatch выполняет батч-верификацию всех findings за один LLM вызов
 // Это намного быстрее чем verifyFindingsParallel (1 call вместо N)
 func (analyzer *GenkitSecurityAnalyzer) verifyFindingsBatch(
@@ -574,9 +460,18 @@ func (analyzer *GenkitSecurityAnalyzer) verifyFindingsBatch(
 	sem := make(chan struct{}, maxConcurrent)
 
 	for i := range findings {
+		// IMPORTANT FIX: Set original index for O(1) lookup in heuristic phase
+		findings[i].OriginalIndex = i
+
 		wg.Add(1)
 		go func(idx int, finding *models.Finding) {
 			defer wg.Done()
+
+			// CRITICAL FIX: Check immediately after entering goroutine, before any access
+			if len(finding.TestRequests) == 0 {
+				log.Printf("⚠️ Finding %s has no test requests, skipping", finding.Title)
+				return
+			}
 
 			defer func() {
 				if r := recover(); r != nil {
@@ -591,10 +486,18 @@ func (analyzer *GenkitSecurityAnalyzer) verifyFindingsBatch(
 			var testResultsForFinding []models.TestResultForBatch
 			var wgTest sync.WaitGroup
 
+			// IMPORTANT FIX: Limit concurrent tests per finding (max 3 concurrent tests)
+			maxConcurrentTests := 3
+			semTest := make(chan struct{}, maxConcurrentTests)
+
 			for testIdx, testReq := range finding.TestRequests {
 				wgTest.Add(1)
 				go func(tIdx int, tReq models.TestRequest) {
 					defer wgTest.Done()
+
+					// Acquire test semaphore (max 3 concurrent tests)
+					semTest <- struct{}{}
+					defer func() { <-semTest }() // IMPORTANT: Release with defer
 
 					// Execute test request
 					testResult := analyzer.executeTestRequest(ctx, tReq, requestInfo)
@@ -615,10 +518,21 @@ func (analyzer *GenkitSecurityAnalyzer) verifyFindingsBatch(
 
 			wgTest.Wait()
 
-			// Add to batch results
+			// Add to batch results (already validated that TestRequests is not empty)
 			mu.Lock()
+
 			testResults = append(testResults, models.TestRequestForBatch{
-				FindingURL:   finding.TestRequests[0].URL, // Use first test's URL
+				FindingIndex: idx, // IMPORTANT FIX: Store index for O(1) lookup
+				// IMPORTANT FIX: Use requestInfo.URL instead of always using test request URL
+				FindingURL: func() string {
+					if requestInfo.URL != "" {
+						return requestInfo.URL
+					}
+					if len(finding.TestRequests) > 0 {
+						return finding.TestRequests[0].URL
+					}
+					return "unknown"
+				}(),
 				FindingTitle: finding.Title,
 				TestResults:  testResultsForFinding,
 			})
@@ -630,6 +544,13 @@ func (analyzer *GenkitSecurityAnalyzer) verifyFindingsBatch(
 
 	// PHASE 2: Heuristic analysis on test results
 	heuristicDecisions := 0
+
+	// IMPORTANT FIX: Create map for O(1) lookup by FindingIndex
+	testResultsMap := make(map[int]models.TestRequestForBatch)
+	for _, reqForBatch := range testResults {
+		testResultsMap[reqForBatch.FindingIndex] = reqForBatch
+	}
+
 	for _, finding := range findings {
 		var bestStatus string
 		var bestConfidence float64
@@ -641,15 +562,9 @@ func (analyzer *GenkitSecurityAnalyzer) verifyFindingsBatch(
 			Body:       requestInfo.RespBody,
 		}
 
-		// Find corresponding test request (contains all test results for this finding)
-		for _, requestForFinding := range testResults {
-			// We need to match by URL or title since FindingIndex is no longer available
-			// For now, assume testResults are in order matching findings
-			// TODO: Add FindingIndex to TestRequestForBatch if needed
-			if requestForFinding.FindingTitle != finding.Title {
-				continue
-			}
-
+		// IMPORTANT FIX: Direct O(1) lookup instead of O(n²) nested loop
+		// Find the corresponding test results using the finding's original index
+		if requestForFinding, ok := testResultsMap[finding.OriginalIndex]; ok {
 			// Check if ANY test indicates vulnerability
 			for _, testResult := range requestForFinding.TestResults {
 				status, confidence, reason := utils.QuickHeuristicAnalysis(&finding, &models.TestResult{

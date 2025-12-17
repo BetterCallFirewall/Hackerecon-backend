@@ -76,8 +76,9 @@ func TestURLAnalysisCache(t *testing.T) {
 	// Test Set and Get
 	pattern1 := "/api/users/{id}"
 	response1 := &models.URLAnalysisResponse{
-		ShouldAnalyze: true,
-		URLNote:       &models.URLNote{Content: "User endpoint"},
+		InterestLevel: "high",
+		EndpointType:  "data_access",
+		Observations:  []string{"User endpoint"},
 	}
 	cache.Set(pattern1, response1)
 
@@ -85,8 +86,8 @@ func TestURLAnalysisCache(t *testing.T) {
 	if !ok {
 		t.Fatal("Expected cache hit, got miss")
 	}
-	if result.URLNote.Content != response1.URLNote.Content {
-		t.Errorf("Expected URLNote %q, got %q", response1.URLNote.Content, result.URLNote.Content)
+	if len(result.Observations) == 0 || result.Observations[0] != response1.Observations[0] {
+		t.Errorf("Expected observation %q, got %v", response1.Observations[0], result.Observations)
 	}
 
 	// Test cache miss
@@ -96,9 +97,9 @@ func TestURLAnalysisCache(t *testing.T) {
 	}
 
 	// Test cache eviction (max size = 3)
-	cache.Set("/api/pattern2", &models.URLAnalysisResponse{URLNote: &models.URLNote{Content: "Pattern 2"}})
-	cache.Set("/api/pattern3", &models.URLAnalysisResponse{URLNote: &models.URLNote{Content: "Pattern 3"}})
-	cache.Set("/api/pattern4", &models.URLAnalysisResponse{URLNote: &models.URLNote{Content: "Pattern 4"}})
+	cache.Set("/api/pattern2", &models.URLAnalysisResponse{InterestLevel: "medium", EndpointType: "other"})
+	cache.Set("/api/pattern3", &models.URLAnalysisResponse{InterestLevel: "low", EndpointType: "static"})
+	cache.Set("/api/pattern4", &models.URLAnalysisResponse{InterestLevel: "high", EndpointType: "api"})
 
 	// First entry should be evicted
 	_, ok = cache.Get(pattern1)
@@ -121,8 +122,9 @@ func TestURLAnalysisCacheTTL(t *testing.T) {
 
 	pattern := "/api/test"
 	response := &models.URLAnalysisResponse{
-		ShouldAnalyze: true,
-		URLNote:       &models.URLNote{Content: "Test endpoint"},
+		InterestLevel: "high",
+		EndpointType:  "api",
+		Observations:  []string{"Test endpoint"},
 	}
 	cache.Set(pattern, response)
 
@@ -149,8 +151,9 @@ func TestURLAnalysisCacheHits(t *testing.T) {
 
 	pattern := "/api/test"
 	response := &models.URLAnalysisResponse{
-		ShouldAnalyze: true,
-		URLNote:       &models.URLNote{Content: "Test endpoint"},
+		InterestLevel: "high",
+		EndpointType:  "api",
+		Observations:  []string{"Test endpoint"},
 	}
 	cache.Set(pattern, response)
 

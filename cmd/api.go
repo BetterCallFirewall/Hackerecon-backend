@@ -63,12 +63,13 @@ func StartAPIServer(analyzer *driven.GenkitSecurityAnalyzer) {
 			techStack = siteContext.TechStack
 		}
 
-		// Формируем DTO с векторами атаки и tech stack
+		// Формируем DTO с investigation suggestions и site understanding
 		dto := models.HypothesisDTO{
 			Type: "hypothesis",
 			Data: &models.HypothesisData{
-				AttackVectors: hypothesisResp.AttackVectors,
-				TechStack:     techStack,
+				InvestigationSuggestions: hypothesisResp.InvestigationSuggestions,
+				SiteUnderstanding:        hypothesisResp.SiteUnderstanding,
+				TechStack:                techStack,
 			},
 		}
 

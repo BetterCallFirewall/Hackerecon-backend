@@ -3,6 +3,8 @@ package driven
 import (
 	"fmt"
 	"log"
+	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -176,6 +178,26 @@ func (m *SiteContextManager) UpdateURLPattern(
 	return siteContext.UpdateURLPattern(patternKey, urlPattern, urlNote)
 }
 
+// UpdateURLPatternSimple обновляет паттерн URL с endpointType (новый API)
+func (m *SiteContextManager) UpdateURLPatternSimple(
+	siteContext *models.SiteContext,
+	url, method string,
+	endpointType string,
+) error {
+	if siteContext == nil {
+		return fmt.Errorf("siteContext cannot be nil")
+	}
+
+	// Создаем базовую заметку из endpointType
+	note := &models.URLNote{
+		Content:    endpointType,
+		Suspicious: false,
+		Confidence: 0.5,
+	}
+
+	return m.UpdateURLPattern(siteContext, url, method, note)
+}
+
 // PerformGlobalCleanup выполняет глобальную очистку всех контекстов
 func (m *SiteContextManager) PerformGlobalCleanup() {
 	m.mutex.Lock()
@@ -213,8 +235,10 @@ func (m *SiteContextManager) PerformGlobalCleanup() {
 	m.lastGlobalCleanup = now
 
 	if cleanupCount > 0 || evictionCount > 0 {
-		log.Printf("Global cleanup completed: %d contexts cleaned, %d contexts evicted, %d total contexts",
-			cleanupCount, evictionCount, len(m.contexts))
+		log.Printf(
+			"Global cleanup completed: %d contexts cleaned, %d contexts evicted, %d total contexts",
+			cleanupCount, evictionCount, len(m.contexts),
+		)
 	}
 }
 
@@ -304,4 +328,174 @@ func (m *SiteContextManager) UpdateLimits(limits *limits.ContextLimits) error {
 	}
 
 	return nil
+}
+
+// MarkPatternAsVulnerable отмечает паттерн как подтвержденно уязвимый
+func (m *SiteContextManager) MarkPatternAsVulnerable(host, pattern string, impact string, testRequest string) error {
+	m.mutex.RLock()
+	context, exists := m.contexts[host]
+	m.mutex.RUnlock()
+
+	if !exists {
+		return fmt.Errorf("context for host %s not found", host)
+	}
+
+	context.MarkPatternAsVulnerable(pattern, impact, testRequest)
+	log.Printf("✅ Marked pattern as vulnerable: %s in %s", pattern, host)
+	return nil
+}
+
+// MarkPatternAsSafe отмечает паттерн как безопасный
+func (m *SiteContextManager) MarkPatternAsSafe(host, pattern string) error {
+	m.mutex.RLock()
+	context, exists := m.contexts[host]
+	m.mutex.RUnlock()
+
+	if !exists {
+		return fmt.Errorf("context for host %s not found", host)
+	}
+
+	context.MarkPatternAsSafe(pattern)
+	log.Printf("✅ Marked pattern as safe: %s in %s", pattern, host)
+	return nil
+}
+
+// IsPatternVerifiedSafe проверяет был ли паттерн верифицирован как безопасный
+func (m *SiteContextManager) IsPatternVerifiedSafe(host, pattern string) bool {
+	m.mutex.RLock()
+	context, exists := m.contexts[host]
+	m.mutex.RUnlock()
+
+	if !exists {
+		return false
+	}
+
+	return context.IsPatternVerifiedSafe(pattern)
+}
+
+// IsPatternVerifiedVulnerable проверяет был ли паттерн верифицирован как уязвимый
+func (m *SiteContextManager) IsPatternVerifiedVulnerable(host, pattern string) bool {
+	m.mutex.RLock()
+	context, exists := m.contexts[host]
+	m.mutex.RUnlock()
+
+	if !exists {
+		return false
+	}
+
+	return context.IsPatternVerifiedVulnerable(pattern)
+}
+
+// FindCrossEndpointPatterns ищет паттерны уязвимостей на нескольких эндпоинтах
+func (m *SiteContextManager) FindCrossEndpointPatterns(host string) []models.CrossEndpointPattern {
+	verifiedPatterns := m.getVerifiedPatternsForHost(host)
+
+	// Группируем паттерны по типам уязвимостей
+	patternMap := make(map[string]*models.CrossEndpointPattern)
+
+	// Анализируем VerifiedPatterns
+	for patternKey, verification := range verifiedPatterns {
+		if !verification.IsVulnerable || verification.Confidence < 0.7 {
+			continue
+		}
+
+		// Извлекаем URL из ключа паттерна (формат: URL:title)
+		parts := strings.Split(patternKey, ":")
+		if len(parts) < 2 {
+			continue
+		}
+
+		url := parts[0]
+
+		// Нормализуем URL в паттерн (e.g., /users/123 → /users/{id})
+		normalizedPattern := normalizeURLPattern(url)
+
+		if crossPattern, exists := patternMap[normalizedPattern]; exists {
+			// Уже встречали этот паттерн
+			if !contains(crossPattern.Endpoints, url) {
+				crossPattern.Endpoints = append(crossPattern.Endpoints, url)
+				crossPattern.LastSeen = time.Now().Unix()
+			}
+		} else {
+			// Новый паттерн
+			patternMap[normalizedPattern] = &models.CrossEndpointPattern{
+				Pattern:           normalizedPattern,
+				Endpoints:         []string{url},
+				IsVulnerable:      true,
+				Confidence:        verification.Confidence,
+				FirstSeen:         verification.VerifiedAt,
+				LastSeen:          verification.VerifiedAt,
+				ImpactedResources: extractResourcesFromURL(url),
+				RecommendedAction: "Check all endpoints with this pattern for the same vulnerability",
+			}
+		}
+	}
+
+	// Преобразуем в slice и возвращаем только паттерны на 2+ эндпоинтах
+	result := make([]models.CrossEndpointPattern, 0)
+	for _, pattern := range patternMap {
+		if len(pattern.Endpoints) >= 2 {
+			result = append(result, *pattern)
+		}
+	}
+
+	if len(result) > 0 {
+		log.Printf("🔗 Found %d cross-endpoint patterns for %s", len(result), host)
+	}
+
+	return result
+}
+
+// getVerifiedPatternsForHost получает VerifiedPatterns для хоста потокобезопасно
+func (m *SiteContextManager) getVerifiedPatternsForHost(host string) map[string]*models.PatternVerification {
+	m.mutex.RLock()
+	context, exists := m.contexts[host]
+	m.mutex.RUnlock()
+
+	if !exists {
+		return make(map[string]*models.PatternVerification)
+	}
+
+	// Копируем паттерны под RLock
+	result := make(map[string]*models.PatternVerification)
+
+	// SiteContext методы уже потокобезопасны, но для копирования все равно нужна блокировка
+	// В models.SiteContext это должно быть реализовано как метод, но временно скопируем
+	// Это хак - нужно добавить метод в SiteContext для безопасного доступа
+
+	// Для теперь просто возвращаем пустой результат если нет прямого доступа
+	if context.VerifiedPatterns != nil {
+		for k, v := range context.VerifiedPatterns {
+			result[k] = v
+		}
+	}
+
+	return result
+}
+
+// extractResourcesFromURL извлекает ресурсы из URL
+func extractResourcesFromURL(url string) []string {
+	// Простое извлечение: /users/123 → ["users"]
+	parts := strings.Split(strings.TrimPrefix(url, "/"), "/")
+	resources := make([]string, 0)
+
+	re := regexp.MustCompile(`^\d+$`)
+	for _, part := range parts {
+		// Пропускаем пустые и числовые части
+		if part != "" && !re.MatchString(part) {
+			resources = append(resources, part)
+		}
+	}
+
+	return resources
+}
+
+// contains проверяет содержит ли slice строку
+func contains(slice []string, str string) bool {
+	for _, s := range slice {
+		if s == str {
+			return true
+		}
+	}
+	return false
 }

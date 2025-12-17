@@ -32,8 +32,8 @@ func NewURLAnalysisCache(maxSize int) *URLAnalysisCache {
 
 // Get получает результат из кэша
 func (c *URLAnalysisCache) Get(pattern string) (*models.URLAnalysisResponse, bool) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
 	entry, ok := c.cache[pattern]
 	if !ok {
@@ -45,6 +45,7 @@ func (c *URLAnalysisCache) Get(pattern string) (*models.URLAnalysisResponse, boo
 		return nil, false
 	}
 
+	// FIXED: increment hits under write lock to prevent race condition
 	entry.hits++
 	return entry.result, true
 }
@@ -100,6 +101,14 @@ func (c *URLAnalysisCache) Stats() map[string]interface{} {
 	}
 }
 
+// Pre-compiled regex patterns for URL normalization (OPTIMIZATION: compile once, use many times)
+var (
+	uuidPattern      = regexp.MustCompile(`/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`)
+	hashPattern      = regexp.MustCompile(`/[0-9a-fA-F]{32,}`)
+	objectIdPattern  = regexp.MustCompile(`/[0-9a-fA-F]{24}`)
+	numericIDPattern = regexp.MustCompile(`/\d+`)
+)
+
 // normalizeURLPattern нормализует URL для кэширования
 // /api/users/123 → /api/users/{id}
 // /api/orders/456/items/789 → /api/orders/{id}/items/{id}
@@ -111,22 +120,19 @@ func normalizeURLPattern(url string) string {
 
 	// Применяем паттерны от более специфичных к менее специфичным
 	// чтобы избежать неправильных замен
+	// OPTIMIZATION: Use pre-compiled patterns
 
 	// 1. Заменяем UUID на {uuid} (самый специфичный)
-	uuidPattern := regexp.MustCompile(`/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`)
 	url = uuidPattern.ReplaceAllString(url, "/{uuid}")
 
 	// 2. Заменяем длинные хеши (32+ hex) на {hash}
-	hashPattern := regexp.MustCompile(`/[0-9a-fA-F]{32,}`)
 	url = hashPattern.ReplaceAllString(url, "/{hash}")
 
 	// 3. Заменяем MongoDB ObjectId (24 hex) на {objectid}
-	objectIdPattern := regexp.MustCompile(`/[0-9a-fA-F]{24}`)
 	url = objectIdPattern.ReplaceAllString(url, "/{objectid}")
 
 	// 4. Заменяем числовые ID на {id} (самый общий, применяем последним)
-	numericID := regexp.MustCompile(`/\d+`)
-	url = numericID.ReplaceAllString(url, "/{id}")
+	url = numericIDPattern.ReplaceAllString(url, "/{id}")
 
 	return url
 }

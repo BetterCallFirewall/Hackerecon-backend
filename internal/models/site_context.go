@@ -8,6 +8,17 @@ import (
 	"github.com/BetterCallFirewall/Hackerecon/internal/limits"
 )
 
+// PatternVerification хранит результаты верификации паттернов
+type PatternVerification struct {
+	Pattern      string  `json:"pattern" jsonschema:"description=Vulnerability pattern or endpoint pattern"`
+	IsVulnerable bool    `json:"is_vulnerable" jsonschema:"description=Whether this pattern is vulnerable"`
+	Impact       string  `json:"impact" jsonschema:"enum=low,enum=medium,enum=high,enum=critical,description=Impact if vulnerable"`
+	VerifiedAt   int64   `json:"verified_at" jsonschema:"description=Timestamp when pattern was verified"`
+	SeenCount    int     `json:"seen_count" jsonschema:"description=How many times this pattern was seen"`
+	Confidence   float64 `json:"confidence" jsonschema:"description=Confidence of verification (0.0-1.0)"`
+	TestRequest  string  `json:"test_request,omitempty" jsonschema:"description=Test request that proved vulnerability"`
+}
+
 // SiteContext хранит накопленную информацию о целевом сайте (только для LLM анализа)
 type SiteContext struct {
 	Host        string                 `json:"host" jsonschema:"description=The target host/domain"`
@@ -15,11 +26,12 @@ type SiteContext struct {
 	TechStack   *TechStack             `json:"tech_stack,omitempty" jsonschema:"description=Detected technology stack"`
 
 	// Enhanced features for better LLM context
-	RecentRequests []TimedRequest              `json:"recent_requests,omitempty"`
-	Forms          map[string]*HTMLForm        `json:"forms,omitempty"`
-	ResourceCRUD   map[string]*ResourceMapping `json:"resource_crud,omitempty"`
-	RequestCount   int64                       `json:"request_count"`
-	LastActivity   int64                       `json:"last_activity"`
+	RecentRequests   []TimedRequest                  `json:"recent_requests,omitempty"`
+	Forms            map[string]*HTMLForm            `json:"forms,omitempty"`
+	ResourceCRUD     map[string]*ResourceMapping     `json:"resource_crud,omitempty"`
+	VerifiedPatterns map[string]*PatternVerification `json:"verified_patterns,omitempty" jsonschema:"description=Verified vulnerability/safe patterns"`
+	RequestCount     int64                           `json:"request_count"`
+	LastActivity     int64                           `json:"last_activity"`
 
 	// Thread safety and management
 	mutex       sync.RWMutex
@@ -30,15 +42,16 @@ type SiteContext struct {
 // NewSiteContext создает новый экземпляр контекста для сайта.
 func NewSiteContext(host string) *SiteContext {
 	return &SiteContext{
-		Host:           host,
-		URLPatterns:    make(map[string]*URLPattern),
-		RecentRequests: make([]TimedRequest, 0, MaxRecentRequests),
-		Forms:          make(map[string]*HTMLForm),
-		ResourceCRUD:   make(map[string]*ResourceMapping),
-		RequestCount:   0,
-		LastActivity:   0,
-		limiter:        limits.NewContextLimiter(nil),
-		lastCleanup:    time.Now().Unix(),
+		Host:             host,
+		URLPatterns:      make(map[string]*URLPattern),
+		RecentRequests:   make([]TimedRequest, 0, MaxRecentRequests),
+		Forms:            make(map[string]*HTMLForm),
+		ResourceCRUD:     make(map[string]*ResourceMapping),
+		VerifiedPatterns: make(map[string]*PatternVerification),
+		RequestCount:     0,
+		LastActivity:     0,
+		limiter:          limits.NewContextLimiter(nil),
+		lastCleanup:      time.Now().Unix(),
 	}
 }
 
@@ -48,15 +61,16 @@ func NewSiteContextWithLimiter(host string, limiter *limits.ContextLimiter) *Sit
 		limiter = limits.NewContextLimiter(nil)
 	}
 	return &SiteContext{
-		Host:           host,
-		URLPatterns:    make(map[string]*URLPattern),
-		RecentRequests: make([]TimedRequest, 0, MaxRecentRequests),
-		Forms:          make(map[string]*HTMLForm),
-		ResourceCRUD:   make(map[string]*ResourceMapping),
-		RequestCount:   0,
-		LastActivity:   0,
-		limiter:        limiter,
-		lastCleanup:    time.Now().Unix(),
+		Host:             host,
+		URLPatterns:      make(map[string]*URLPattern),
+		RecentRequests:   make([]TimedRequest, 0, MaxRecentRequests),
+		Forms:            make(map[string]*HTMLForm),
+		ResourceCRUD:     make(map[string]*ResourceMapping),
+		VerifiedPatterns: make(map[string]*PatternVerification),
+		RequestCount:     0,
+		LastActivity:     0,
+		limiter:          limiter,
+		lastCleanup:      time.Now().Unix(),
 	}
 }
 
@@ -65,7 +79,7 @@ type URLPattern struct {
 	Pattern string    `json:"pattern" jsonschema:"description=URL pattern"`
 	Method  string    `json:"method" jsonschema:"enum=GET,enum=POST,enum=PUT,enum=DELETE,enum=PATCH,enum=OPTIONS,enum=HEAD,description=HTTP method"`
 	Purpose string    `json:"purpose" jsonschema:"description=Purpose of this endpoint (e.g., 'User profile viewing')"`
-	Notes   []URLNote `json:"notes" jsonschema:"description=Historical notes about this URL pattern (max 100)"`
+	Notes   []URLNote `json:"notes,omitempty" jsonschema:"description=Historical notes about this URL pattern (max 100)"`
 }
 
 // URLNote содержит заметку LLM о URL (только для анализа)
@@ -392,10 +406,140 @@ func (sc *SiteContext) GetStats() map[string]interface{} {
 	}
 }
 
-// Memory limits
+// MarkPatternAsVulnerable отмечает паттерн как уязвимый
+func (sc *SiteContext) MarkPatternAsVulnerable(pattern string, impact string, testRequest string) {
+	sc.mutex.Lock()
+	defer sc.mutex.Unlock()
+
+	if sc.VerifiedPatterns == nil {
+		sc.VerifiedPatterns = make(map[string]*PatternVerification)
+	}
+
+	verification := sc.VerifiedPatterns[pattern]
+	if verification == nil {
+		verification = &PatternVerification{
+			Pattern:      pattern,
+			IsVulnerable: true,
+			Impact:       impact,
+			VerifiedAt:   time.Now().Unix(),
+			SeenCount:    1,
+			Confidence:   0.95,
+			TestRequest:  testRequest,
+		}
+	} else {
+		verification.IsVulnerable = true
+		verification.SeenCount++
+		verification.Confidence = 0.95
+		verification.VerifiedAt = time.Now().Unix()
+		if testRequest != "" {
+			verification.TestRequest = testRequest
+		}
+	}
+
+	sc.VerifiedPatterns[pattern] = verification
+}
+
+// MarkPatternAsSafe отмечает паттерн как безопасный
+func (sc *SiteContext) MarkPatternAsSafe(pattern string) {
+	sc.mutex.Lock()
+	defer sc.mutex.Unlock()
+
+	if sc.VerifiedPatterns == nil {
+		sc.VerifiedPatterns = make(map[string]*PatternVerification)
+	}
+
+	verification := sc.VerifiedPatterns[pattern]
+	if verification == nil {
+		verification = &PatternVerification{
+			Pattern:      pattern,
+			IsVulnerable: false,
+			VerifiedAt:   time.Now().Unix(),
+			SeenCount:    1,
+			Confidence:   0.90,
+		}
+	} else {
+		verification.IsVulnerable = false
+		verification.SeenCount++
+		verification.Confidence = 0.90
+		verification.VerifiedAt = time.Now().Unix()
+	}
+
+	sc.VerifiedPatterns[pattern] = verification
+}
+
+// IsPatternVerifiedSafe проверяет был ли паттерн верифицирован как безопасный
+func (sc *SiteContext) IsPatternVerifiedSafe(pattern string) bool {
+	sc.mutex.RLock()
+	defer sc.mutex.RUnlock()
+
+	if sc.VerifiedPatterns == nil {
+		return false
+	}
+
+	verification, exists := sc.VerifiedPatterns[pattern]
+	if !exists {
+		return false
+	}
+
+	// Возвращаем true если паттерн не уязвим и хорошо проверен
+	return !verification.IsVulnerable && verification.Confidence > 0.7
+}
+
+// IsPatternVerifiedVulnerable проверяет был ли паттерн верифицирован как уязвимый
+func (sc *SiteContext) IsPatternVerifiedVulnerable(pattern string) bool {
+	sc.mutex.RLock()
+	defer sc.mutex.RUnlock()
+
+	if sc.VerifiedPatterns == nil {
+		return false
+	}
+
+	verification, exists := sc.VerifiedPatterns[pattern]
+	if !exists {
+		return false
+	}
+
+	// Возвращаем true если паттерн уязвим и хорошо проверен
+	return verification.IsVulnerable && verification.Confidence > 0.7
+}
+
+// CrossEndpointPattern паттерн уязвимости на нескольких эндпоинтах
+type CrossEndpointPattern struct {
+	Pattern           string   `json:"pattern" jsonschema:"description=Vulnerability pattern (e.g., 'IDOR with numeric ID')"`
+	Endpoints         []string `json:"endpoints" jsonschema:"description=Endpoints affected"`
+	IsVulnerable      bool     `json:"is_vulnerable" jsonschema:"description=Whether pattern is vulnerable"`
+	Confidence        float64  `json:"confidence" jsonschema:"description=Confidence level (0.0-1.0)"`
+	FirstSeen         int64    `json:"first_seen" jsonschema:"description=When pattern was first detected"`
+	LastSeen          int64    `json:"last_seen" jsonschema:"description=When pattern was last seen"`
+	ImpactedResources []string `json:"impacted_resources" jsonschema:"description=Resources that may be affected"`
+	RecommendedAction string   `json:"recommended_action,omitempty" jsonschema:"description=Recommended action"`
+}
+
+// InvestigationSuggestion - предложение по исследованию (для новой HypothesisResponse)
+type InvestigationSuggestion struct {
+	Title                string   `json:"title" jsonschema:"description=Title of investigation area"`
+	Reasoning            string   `json:"reasoning" jsonschema:"description=Why this is interesting based on observed data"`
+	AffectedEndpoints    []string `json:"affected_endpoints" jsonschema:"description=Endpoints related to this investigation"`
+	WhatToCheck          []string `json:"what_to_check" jsonschema:"description=Concrete steps to check"`
+	Priority             string   `json:"priority" jsonschema:"enum=recommend,enum=consider,enum=optional,description=Priority level"`
+	CrossEndpointPattern string   `json:"cross_endpoint_pattern,omitempty" jsonschema:"description=Pattern across endpoints if identified,nullable"`
+}
+
+// SiteUnderstanding - понимание сайта в целом
+type SiteUnderstanding struct {
+	LikelyArchitecture   string `json:"likely_architecture" jsonschema:"description=Likely architecture (Monolith/Microservices/SPA+API)"`
+	AuthMechanism        string `json:"auth_mechanism" jsonschema:"description=Detected authentication mechanism"`
+	DataSensitivity      string `json:"data_sensitivity" jsonschema:"description=Sensitive data observed"`
+	AttackSurfaceSummary string `json:"attack_surface_summary" jsonschema:"description=Summary of attack surface"`
+}
+
 const (
-	MaxRecentRequests = 50 // Per host
-	MaxForms          = 20 // Per host
-	MaxResources      = 30 // Per host
-	MaxAgeHours       = 24 // Cleanup after 24h
+	// MaxRecentRequests - максимальное количество последних запросов для анализа паттернов
+	MaxRecentRequests = 50
+	// MaxForms - максимальное количество форм для хранения
+	MaxForms = 20
+	// MaxResources - максимальное количество ресурсов для отслеживания CRUD операций
+	MaxResources = 30
+	// MaxAgeHours - максимальный возраст данных перед очисткой (часы)
+	MaxAgeHours = 24
 )

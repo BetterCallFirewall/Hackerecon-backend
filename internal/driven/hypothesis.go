@@ -56,12 +56,20 @@ func (g *HypothesisGenerator) GenerateForHost(host string) (*models.HypothesisRe
 	// Собираем информацию о технологиях
 	techInfo := g.analyzeTechVulnerabilities(siteContext)
 
+	// Собираем результаты верификации
+	verificationSummary := g.buildVerificationSummary(siteContext)
+
+	// Ищем кросс-эндпоинт паттерны
+	crossEndpointPatterns := g.contextManager.FindCrossEndpointPatterns(siteContext.Host)
+
 	// Создаем запрос - даем LLM весь контекст для самостоятельного анализа
 	hypothesisReq := &models.HypothesisRequest{
-		SiteContext:         siteContext,
-		SuspiciousPatterns:  suspiciousPatterns,
-		TechVulnerabilities: techInfo,
-		PreviousHypothesis:  nil, // Убрано из SiteContext
+		SiteContext:           siteContext,
+		SuspiciousPatterns:    suspiciousPatterns,
+		TechVulnerabilities:   techInfo,
+		PreviousHypothesis:    nil, // Убрано из SiteContext
+		VerificationResults:   verificationSummary,
+		CrossEndpointPatterns: crossEndpointPatterns,
 	}
 
 	// Запускаем генерацию гипотезы
@@ -74,11 +82,11 @@ func (g *HypothesisGenerator) GenerateForHost(host string) (*models.HypothesisRe
 	}
 
 	// Логируем результат генерации гипотез
-	if len(resp.AttackVectors) > 0 {
-		mainHypothesis := resp.AttackVectors[0]
+	if len(resp.InvestigationSuggestions) > 0 {
+		mainSuggestion := resp.InvestigationSuggestions[0]
 		log.Printf(
-			"🎯 Hypotheses generated for %s: %d vectors, main: %s (confidence: %.2f)",
-			host, len(resp.AttackVectors), mainHypothesis.Title, mainHypothesis.Confidence,
+			"🎯 Hypotheses generated for %s: %d suggestions, main: %s (priority: %s)",
+			host, len(resp.InvestigationSuggestions), mainSuggestion.Title, mainSuggestion.Priority,
 		)
 	}
 
@@ -145,4 +153,41 @@ func (g *HypothesisGenerator) validateDataQuality(siteContext *models.SiteContex
 	}
 
 	return nil
+}
+
+// buildVerificationSummary собирает информацию о результатах верификации
+func (g *HypothesisGenerator) buildVerificationSummary(siteContext *models.SiteContext) *models.VerificationSummary {
+	if len(siteContext.VerifiedPatterns) == 0 {
+		return nil
+	}
+
+	summary := &models.VerificationSummary{
+		TotalPatternsAnalyzed: len(siteContext.VerifiedPatterns),
+		HighConfidenceMatches: make([]string, 0),
+		RepeatingPatterns:     make([]string, 0),
+	}
+
+	// Подсчитаем результаты
+	for _, verification := range siteContext.VerifiedPatterns {
+		if verification.IsVulnerable && verification.Confidence > 0.7 {
+			summary.ConfirmedVulnerable++
+			if verification.Confidence > 0.85 {
+				summary.HighConfidenceMatches = append(summary.HighConfidenceMatches, verification.Pattern)
+			}
+		} else if !verification.IsVulnerable && verification.Confidence > 0.7 {
+			summary.ConfirmedSafe++
+		} else {
+			summary.Inconclusive++
+		}
+
+		// Если паттерн видели на нескольких эндпоинтах
+		if verification.SeenCount >= 2 {
+			summary.RepeatingPatterns = append(summary.RepeatingPatterns, verification.Pattern)
+		}
+	}
+
+	log.Printf("📊 Verification Summary: %d analyzed, %d vulnerable, %d safe, %d inconclusive",
+		summary.TotalPatternsAnalyzed, summary.ConfirmedVulnerable, summary.ConfirmedSafe, summary.Inconclusive)
+
+	return summary
 }

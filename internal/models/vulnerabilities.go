@@ -28,6 +28,9 @@ type Finding struct {
 	Effort               string        `json:"effort" jsonschema:"enum=low,enum=medium,enum=high,description=Effort to test"`
 	Impact               string        `json:"impact" jsonschema:"enum=low,enum=medium,enum=high,enum=critical,description=Impact if exploited"`
 
+	// IMPORTANT FIX: Index in original findings array for O(1) lookup
+	OriginalIndex int `json:"-"` // Internal field, not exposed to JSON
+
 	// Verification results
 	VerificationStatus string `json:"verification_status,omitempty" jsonschema:"enum=verified,enum=likely_false,enum=inconclusive,enum=manual_check,description=Auto-verification status"`
 	VerificationReason string `json:"verification_reason,omitempty" jsonschema:"description=Why this status was assigned"`
@@ -251,8 +254,9 @@ type FindingForBatchVerification struct {
 
 // TestRequestForBatch stores test results for a specific finding
 type TestRequestForBatch struct {
-	FindingURL   string           `json:"finding_url" jsonschema:"description=URL of the finding"`
-	FindingTitle string           `json:"finding_title" jsonschema:"description=Title of the finding"`
+	FindingIndex int                  `json:"finding_index" jsonschema:"description=Index of finding in original array for O(1) lookup"`
+	FindingURL   string               `json:"finding_url" jsonschema:"description=URL of the finding"`
+	FindingTitle string               `json:"finding_title" jsonschema:"description=Title of the finding"`
 	TestResults  []TestResultForBatch `json:"test_results" jsonschema:"description=Results of all tests for this finding"`
 }
 

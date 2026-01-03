@@ -34,17 +34,8 @@ func NewSecurityProxyWithGenkit(cfg config.LLMConfig, wsHub *websocket.Websocket
 		return nil, fmt.Errorf("failed to initialize Genkit: %w", err)
 	}
 
-	// Создаём провайдер с готовым GenkitApp
-	provider, err := llm.NewProvider(genkitApp, cfg)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create LLM provider: %w", err)
-	}
-
-	// Создаём analyzer с GenkitApp и provider
-	analyzer, err := NewGenkitSecurityAnalyzer(genkitApp, provider, wsHub)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create analyzer: %w", err)
-	}
+	// Создаём analyzer с new signature (no provider needed)
+	analyzer := NewGenkitSecurityAnalyzer(genkitApp, cfg.Model, wsHub)
 	log.Printf("✅ LLM провайдер: %s (модель: %s)", cfg.Provider, cfg.Model)
 
 	return &SecurityProxyWithGenkit{
@@ -200,15 +191,37 @@ func createProxyRequest(inReq *http.Request, body []byte) *http.Request {
 func (ps *SecurityProxyWithGenkit) analyzeTraffic(
 	req *http.Request, reqBody string, resp *http.Response, respBody string,
 ) {
-	contentType := resp.Header.Get("Content-Type")
-
 	// Фильтрация выполняется в Analyzer через RequestFilter
 	// INCREASED: 30s → 120s для сложных анализов с retry
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
-	err := ps.Analyzer.AnalyzeHTTPTraffic(ctx, req, resp, reqBody, respBody, contentType)
+	// Convert http.Header to map[string]string for new signature
+	reqHeaders := headersToMap(req.Header)
+	respHeaders := headersToMap(resp.Header)
+
+	err := ps.Analyzer.AnalyzeHTTPTraffic(
+		ctx,
+		req.Method,
+		req.URL.String(),
+		reqHeaders,
+		respHeaders,
+		reqBody,
+		respBody,
+		resp.StatusCode,
+	)
 	if err != nil {
 		log.Printf("❌ Ошибка анализа %s: %v", req.URL.String(), err)
 	}
+}
+
+// headersToMap converts http.Header to map[string]string
+func headersToMap(headers http.Header) map[string]string {
+	result := make(map[string]string)
+	for k, v := range headers {
+		if len(v) > 0 {
+			result[k] = v[0]
+		}
+	}
+	return result
 }

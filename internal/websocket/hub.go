@@ -46,12 +46,12 @@ func (m *WebsocketManager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	m.connMutex.Lock()
 	// Если уже было старое соединение, закрываем его.
 	if m.activeConn != nil {
-		log.Println("Closing previous WebSocket connection to establish a new one.")
+		// log.Println("Closing previous WebSocket connection to establish a new one.")
 		m.activeConn.Close()
 	}
 	// Устанавливаем новое активное соединение.
 	m.activeConn = conn
-	log.Println("New WebSocket client connected.")
+	// log.Println("New WebSocket client connected.")
 	m.connMutex.Unlock()
 
 	ch := make(chan struct{})
@@ -74,10 +74,10 @@ func (m *WebsocketManager) Broadcast(data interface{}) {
 		select {
 		case m.broadcast <- jsonData:
 		default:
-			log.Println("Broadcast channel is full, skipping message.")
+			// log.Println("Broadcast channel is full, skipping message.")
 		}
 	} else {
-		log.Println("No active client to broadcast to, skipping message.")
+		// log.Println("No active client to broadcast to, skipping message.")
 	}
 }
 
@@ -87,12 +87,12 @@ func (m *WebsocketManager) writePump(conn *websocket.Conn, ch chan struct{}) {
 	for {
 		select {
 		case <-ch:
-			log.Println("writePump: received disconnect signal, stopping writePump.")
+			// log.Println("writePump: received disconnect signal, stopping writePump.")
 			return
 		case message, ok := <-m.broadcast:
-			log.Printf("writePump: received message: %s", message)
+			// log.Printf("writePump: received message: %s", message)
 			if !ok {
-				log.Println("Broadcast channel closed, stopping writePump.")
+				// log.Println("Broadcast channel closed, stopping writePump.")
 				conn.WriteMessage(websocket.CloseMessage, []byte{})
 				return
 			}
@@ -101,9 +101,9 @@ func (m *WebsocketManager) writePump(conn *websocket.Conn, ch chan struct{}) {
 				// Не логируем ошибку, если она связана с закрытием соединения,
 				// так как это ожидаемое поведение при смене клиента.
 				if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-					log.Printf("Unexpected writePump error: %v", err)
+					// log.Printf("Unexpected writePump error: %v", err)
 				}
-				log.Printf("writePump: closing connection: %v", err)
+				// log.Printf("writePump: closing connection: %v", err)
 				return
 			}
 		}
@@ -117,7 +117,7 @@ func (m *WebsocketManager) readPump(conn *websocket.Conn, ch chan struct{}) {
 		// Очищаем ссылку только если это все еще то же самое соединение.
 		if m.activeConn == conn {
 			m.activeConn = nil
-			log.Println("WebSocket client disconnected.")
+			// log.Println("WebSocket client disconnected.")
 			ch <- struct{}{}
 		}
 		m.connMutex.Unlock()
@@ -127,7 +127,7 @@ func (m *WebsocketManager) readPump(conn *websocket.Conn, ch chan struct{}) {
 	for {
 		if _, _, err := conn.ReadMessage(); err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				log.Printf("Unexpected readPump error: %v", err)
+				// log.Printf("Unexpected readPump error: %v", err)
 			}
 			break
 		}

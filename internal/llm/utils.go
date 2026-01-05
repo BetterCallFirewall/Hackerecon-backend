@@ -2,7 +2,6 @@ package llm
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
 	"github.com/BetterCallFirewall/Hackerecon/internal/config"
@@ -57,19 +56,22 @@ func getMiddlewares() []ai.ModelMiddleware {
 	return []ai.ModelMiddleware{}
 }
 
-// formatHeaders formats headers map to JSON string for prompts
-// Returns valid JSON that LLM can easily parse
+// formatHeaders formats headers map to plain text (NOT JSON to avoid LLM confusion)
+// Returns "Key: Value\nKey2: Value2" format instead of JSON
+// This prevents LLM from copying header names into observation JSON fields
 func formatHeaders(headers map[string]string) string {
 	if len(headers) == 0 {
-		return "{}"
+		return "(none)"
 	}
 
-	// Use json.Marshal for guaranteed valid JSON
-	result, err := json.Marshal(headers)
-	if err != nil {
-		return "{}"
+	var result string
+	for k, v := range headers {
+		if result != "" {
+			result += "\n  "
+		}
+		result += fmt.Sprintf("%s: %s", k, v)
 	}
-	return string(result)
+	return result
 }
 
 // TruncateString truncates a string to maxLen with "..." suffix if needed

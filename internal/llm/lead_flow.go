@@ -42,8 +42,11 @@ func DefineLeadGenerationFlow(
 				return nil, fmt.Errorf("LLM generation failed: %w", err)
 			}
 
-			log.Printf("✅ Lead generation complete: is_actionable=%v, title=%s, pocs_count=%d",
-				result.IsActionable, result.Title, len(result.PoCs))
+			log.Printf("✅ Lead generation complete: leads_count=%d", len(result.Leads))
+			for i, lead := range result.Leads {
+				log.Printf("   Lead %d: is_actionable=%v, title=%s, pocs_count=%d",
+					i, lead.IsActionable, lead.Title, len(lead.PoCs))
+			}
 
 			return result, nil
 		},

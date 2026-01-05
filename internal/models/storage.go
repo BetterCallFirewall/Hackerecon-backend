@@ -30,17 +30,22 @@ type InMemoryGraph struct {
 	observationCount int
 	leadCount        int
 	connectionCount  int
+
+	// IMPORTANT FIX #1: Configurable limit to prevent unbounded memory growth
+	maxObservations int
 }
 
 // NewInMemoryGraph creates a new in-memory graph
+// IMPORTANT FIX #1: Initialize with configurable max observations limit (default: 1000)
 func NewInMemoryGraph() *InMemoryGraph {
 	return &InMemoryGraph{
-		exchanges:    make(map[string]*HTTPExchange),
-		observations: make(map[string]*Observation),
-		leads:        make(map[string]*Lead),
-		connections:  make([]*Connection, 0),
-		siteMap:      make(map[string]*SiteMapEntry),
-		bigPicture:   &BigPicture{},
+		exchanges:       make(map[string]*HTTPExchange),
+		observations:    make(map[string]*Observation),
+		leads:           make(map[string]*Lead),
+		connections:     make([]*Connection, 0),
+		siteMap:         make(map[string]*SiteMapEntry),
+		bigPicture:      &BigPicture{},
+		maxObservations: 1000, // Configurable limit to prevent unbounded memory growth
 	}
 }
 
@@ -74,9 +79,16 @@ func (g *InMemoryGraph) GetExchange(id string) (*HTTPExchange, error) {
 }
 
 // AddObservation adds an observation and returns its ID
+// IMPORTANT FIX #1: Prune oldest observation if limit exceeded (FIFO)
 func (g *InMemoryGraph) AddObservation(observation *Observation) string {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+
+	// IMPORTANT FIX #1: Prune oldest observation if limit exceeded (FIFO)
+	// This prevents unbounded memory growth during long-running sessions
+	if len(g.observations) >= g.maxObservations {
+		g.pruneOldestObservation()
+	}
 
 	// Always generate a new ID internally to prevent race conditions
 	g.observationCount++
@@ -334,4 +346,31 @@ func (g *InMemoryGraph) GetAllConnections() []*Connection {
 	connections := make([]*Connection, len(g.connections))
 	copy(connections, g.connections)
 	return connections
+}
+
+// pruneOldestObservation removes the oldest observation from the graph
+// IMPORTANT FIX #1: Helper method for FIFO pruning to prevent unbounded memory growth
+// NOTE: This must be called while holding the write lock (mu.Lock)
+func (g *InMemoryGraph) pruneOldestObservation() {
+	if len(g.observations) == 0 {
+		return
+	}
+
+	// Find oldest observation by CreatedAt
+	var oldestID string
+	var oldestTime time.Time
+	first := true
+
+	for id, obs := range g.observations {
+		if first || obs.CreatedAt.Before(oldestTime) {
+			oldestID = id
+			oldestTime = obs.CreatedAt
+			first = false
+		}
+	}
+
+	// Remove oldest observation
+	if oldestID != "" {
+		delete(g.observations, oldestID)
+	}
 }

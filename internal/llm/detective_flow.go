@@ -25,13 +25,13 @@ type DetectiveAIRequest struct {
 type DetectiveAIResult struct {
 	// Unified analysis results
 	Comment          string                   `json:"comment"`
-	Observation      *models.Observation      `json:"observation,omitempty"`
+	Observations     []models.Observation     `json:"observations,omitempty"`
 	Connections      []models.Connection      `json:"connections,omitempty"`
 	BigPictureImpact *models.BigPictureImpact `json:"big_picture_impact,omitempty"`
 	SiteMapComment   string                   `json:"site_map_comment,omitempty"`
 
-	// Lead generation results (optional, only if observation exists)
-	Lead *LeadGenerationResponse `json:"lead,omitempty"`
+	// Lead generation results (optional, one lead per observation)
+	Leads []*LeadGenerationResponse `json:"leads,omitempty"`
 }
 
 // DefineDetectiveAIFlow creates the orchestration flow that coordinates:
@@ -68,41 +68,42 @@ func DefineDetectiveAIFlow(
 				return nil, fmt.Errorf("unified analysis failed: %w", err)
 			}
 
-			log.Printf("✅ Unified analysis complete: comment=%s, has_observation=%v",
-				unifiedResp.Comment, unifiedResp.Observation != nil)
+			log.Printf("✅ Unified analysis complete: comment=%s, observations_count=%d",
+				unifiedResp.Comment, len(unifiedResp.Observations))
 
 			// ═══════════════════════════════════════════════════════════════════════════════
-			// Step 2: Lead Generation (optional, conditional)
+			// Step 2: Lead Generation (optional, conditional - for each observation)
+			// NOTE: Each observation can generate 0, 1, or multiple leads
 			// ═══════════════════════════════════════════════════════════════════════════════
 
-			var leadResp *LeadGenerationResponse
+			var allLeads []*LeadGenerationResponse
 
-			if unifiedResp.Observation != nil {
-				log.Printf("💡 Observation found, generating lead...")
+			if len(unifiedResp.Observations) > 0 {
+				log.Printf("💡 Found %d observation(s), generating leads...", len(unifiedResp.Observations))
 
-				leadReq := &LeadGenerationRequest{
-					Observation: *unifiedResp.Observation,
-					BigPicture:  req.BigPicture,
-				}
+				for i, obs := range unifiedResp.Observations {
+					leadReq := &LeadGenerationRequest{
+						Observation: obs,
+						BigPicture:  req.BigPicture,
+					}
 
-				leadResult, err := genkit.Run(
-					ctx, "leadGeneration",
-					func() (*LeadGenerationResponse, error) {
-						return leadFlow(ctx, leadReq)
-					},
-				)
-				if err != nil {
-					// Lead generation is optional, don't fail entire flow
-					log.Printf("⚠️ Lead generation failed (non-critical): %v", err)
-					leadResp = nil
-				} else {
-					leadResp = leadResult
-					log.Printf("✅ Lead generation complete: is_actionable=%v, title=%s",
-						leadResp.IsActionable, leadResp.Title)
+					leadResult, err := genkit.Run(
+						ctx, fmt.Sprintf("leadGeneration_%d", i),
+						func() (*LeadGenerationResponse, error) {
+							return leadFlow(ctx, leadReq)
+						},
+					)
+					if err != nil {
+						// Lead generation is optional, don't fail entire flow
+						log.Printf("⚠️ Lead generation failed for observation %d (non-critical): %v", i, err)
+					} else {
+						allLeads = append(allLeads, leadResult)
+						log.Printf("✅ Lead generation complete for observation %d: leads_count=%d",
+							i, len(leadResult.Leads))
+					}
 				}
 			} else {
-				log.Printf("ℹ️ No observation found, skipping lead generation")
-				leadResp = nil
+				log.Printf("ℹ️ No observations found, skipping lead generation")
 			}
 
 			// ═══════════════════════════════════════════════════════════════════════════════
@@ -111,15 +112,15 @@ func DefineDetectiveAIFlow(
 
 			result := &DetectiveAIResult{
 				Comment:          unifiedResp.Comment,
-				Observation:      unifiedResp.Observation,
+				Observations:     unifiedResp.Observations,
 				Connections:      unifiedResp.Connections,
 				BigPictureImpact: unifiedResp.BigPictureImpact,
 				SiteMapComment:   unifiedResp.SiteMapComment,
-				Lead:             leadResp,
+				Leads:            allLeads,
 			}
 
-			log.Printf("🎯 Detective AI flow complete: has_observation=%v, has_lead=%v",
-				result.Observation != nil, result.Lead != nil && result.Lead.IsActionable)
+			log.Printf("🎯 Detective AI flow complete: observations_count=%d, leads_count=%d",
+				len(result.Observations), len(result.Leads))
 
 			return result, nil
 		},

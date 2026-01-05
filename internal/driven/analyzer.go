@@ -100,7 +100,7 @@ func (a *GenkitSecurityAnalyzer) AnalyzeHTTPTraffic(
 	aiResult, err := a.detectiveAIFlow.Run(ctx, &llm.DetectiveAIRequest{
 		Exchange:           exchange,
 		BigPicture:         a.graph.GetBigPicture(),
-		RecentObservations: a.getRecentObservations(10),
+		RecentObservations: a.getAllObservations(),
 	})
 	if err != nil {
 		return fmt.Errorf("detective AI failed: %w", err)
@@ -108,20 +108,20 @@ func (a *GenkitSecurityAnalyzer) AnalyzeHTTPTraffic(
 
 	// STEP 4: Apply results to storage (OUTSIDE Genkit flow)
 	// Storage operations are separate from LLM operations
-	observationID := a.applyAIResult(exchangeID, exchange, aiResult)
+	observationIDs := a.applyAIResult(exchangeID, exchange, aiResult)
 
 	// STEP 5: SINGLE WebSocket message
 	// Replaces multiple broadcasts from old flow
 	a.wsHub.Broadcast(websocket.DetectiveDTO{
-		ExchangeID:  exchangeID,
-		Method:      method,
-		URL:         url,
-		StatusCode:  statusCode,
-		Comment:     aiResult.Comment,
-		Observation: aiResult.Observation,
-		Connections: aiResult.Connections,
-		BigPicture:  a.graph.GetBigPicture(),
-		Lead:        a.leadFromResponse(observationID, aiResult.Lead),
+		ExchangeID:   exchangeID,
+		Method:       method,
+		URL:          url,
+		StatusCode:   statusCode,
+		Comment:      aiResult.Comment,
+		Observations: aiResult.Observations,
+		Connections:  aiResult.Connections,
+		BigPicture:   a.graph.GetBigPicture(),
+		Leads:        a.leadsFromResponse(observationIDs, aiResult.Leads),
 	})
 
 	log.Printf("✅ Analysis complete for %s %s", method, url)
@@ -133,25 +133,41 @@ func (a *GenkitSecurityAnalyzer) applyAIResult(
 	exchangeID string,
 	exchange models.HTTPExchange,
 	aiResult *llm.DetectiveAIResult,
-) string {
-	var observationID string
+) []string {
+	var observationIDs []string
 
-	// Store observation
-	if aiResult.Observation != nil {
-		aiResult.Observation.ExchangeID = exchangeID
-		observationID = a.graph.AddObservation(aiResult.Observation)
+	// Store all observations
+	for i := range aiResult.Observations {
+		aiResult.Observations[i].ExchangeID = exchangeID
+		obsID := a.graph.AddObservation(&aiResult.Observations[i])
+		observationIDs = append(observationIDs, obsID)
 
-		log.Printf("💡 Added observation %s", observationID)
-		log.Printf("   - What: %s", aiResult.Observation.What)
-		log.Printf("   - Where: %s", aiResult.Observation.Where)
-		log.Printf("   - Why: %s", aiResult.Observation.Why)
+		log.Printf("💡 Added observation %s", obsID)
+		log.Printf("   - What: %s", aiResult.Observations[i].What)
+		log.Printf("   - Where: %s", aiResult.Observations[i].Where)
+		log.Printf("   - Why: %s", aiResult.Observations[i].Why)
+	}
 
-		// Store connections
-		for _, conn := range aiResult.Connections {
-			a.graph.AddConnection(observationID, conn.ID2, conn.Reason)
-			log.Printf("🔗 Connection: %s -> %s", observationID, conn.ID2)
-			log.Printf("   Reason: %s", conn.Reason)
+	// Store connections (link current observations to previous ones)
+	// LLM provides id2 (target observation from Previous Observations list)
+	// Go code provides id1 (current observation being created)
+	for _, conn := range aiResult.Connections {
+		// Skip if no target specified by LLM
+		if conn.ID2 == "" {
+			log.Printf("⚠️ Skipping connection: no id2 specified")
+			continue
 		}
+
+		// Use first observation ID as source (current observation)
+		if len(observationIDs) == 0 {
+			log.Printf("⚠️ Skipping connection: no current observations to link from")
+			continue
+		}
+
+		id1 := observationIDs[0]
+		a.graph.AddConnection(id1, conn.ID2, conn.Reason)
+		log.Printf("🔗 Connection: %s -> %s", id1, conn.ID2)
+		log.Printf("   Reason: %s", conn.Reason)
 	}
 
 	// Update BigPicture
@@ -175,23 +191,32 @@ func (a *GenkitSecurityAnalyzer) applyAIResult(
 		aiResult.SiteMapComment,
 	)
 
-	// Store lead
-	if aiResult.Lead != nil && observationID != "" {
-		lead := models.Lead{
-			ObservationID:  observationID,
-			Title:          aiResult.Lead.Title,
-			ActionableStep: aiResult.Lead.ActionableStep,
-			PoCs:           aiResult.Lead.PoCs,
-			CreatedAt:      time.Now(),
+	// Store all leads (0, 1, or multiple per observation)
+	// Each LeadGenerationResponse contains an array of leads for one observation
+	for obsIdx, leadResp := range aiResult.Leads {
+		if obsIdx >= len(observationIDs) || leadResp == nil {
+			continue
 		}
-		leadID := a.graph.AddLead(&lead)
-		log.Printf("🎯 Added lead %s", leadID)
-		log.Printf("   - Title: %s", lead.Title)
-		log.Printf("   - Step: %s", lead.ActionableStep)
-		log.Printf("   - PoCs: %d", len(lead.PoCs))
+
+		obsID := observationIDs[obsIdx]
+		for leadIdx, leadData := range leadResp.Leads {
+			lead := models.Lead{
+				ObservationID:  obsID,
+				Title:          leadData.Title,
+				ActionableStep: leadData.ActionableStep,
+				PoCs:           leadData.PoCs,
+				CreatedAt:      time.Now(),
+			}
+			leadID := a.graph.AddLead(&lead)
+			log.Printf("🎯 Added lead %s for observation %s (lead %d of this observation)",
+				leadID, obsID, leadIdx+1)
+			log.Printf("   - Title: %s", lead.Title)
+			log.Printf("   - Step: %s", lead.ActionableStep)
+			log.Printf("   - PoCs: %d", len(lead.PoCs))
+		}
 	}
 
-	return observationID
+	return observationIDs
 }
 
 // shouldSkipRequest checks if a request should be skipped using heuristic filtering
@@ -263,31 +288,62 @@ func isSkippableContentType(contentType string) bool {
 	return false
 }
 
-// leadFromResponse creates Lead entity from response
-func (a *GenkitSecurityAnalyzer) leadFromResponse(
-	observationID string,
-	resp *llm.LeadGenerationResponse,
-) *models.Lead {
-	if resp == nil || observationID == "" {
+// leadsFromResponse creates Lead entities from response array
+// Now handles multiple leads per observation
+func (a *GenkitSecurityAnalyzer) leadsFromResponse(
+	observationIDs []string,
+	resps []*llm.LeadGenerationResponse,
+) []models.Lead {
+	if len(resps) == 0 || len(observationIDs) == 0 {
 		return nil
 	}
 
-	return &models.Lead{
-		ObservationID:  observationID,
-		Title:          resp.Title,
-		ActionableStep: resp.ActionableStep,
-		PoCs:           resp.PoCs,
-		CreatedAt:      time.Now(),
+	// Pre-allocate with approximate capacity
+	totalLeads := 0
+	for _, resp := range resps {
+		if resp != nil {
+			totalLeads += len(resp.Leads)
+		}
 	}
+
+	leads := make([]models.Lead, 0, totalLeads)
+	for obsIdx, resp := range resps {
+		if resp == nil || obsIdx >= len(observationIDs) {
+			continue
+		}
+
+		obsID := observationIDs[obsIdx]
+		for _, leadData := range resp.Leads {
+			leads = append(leads, models.Lead{
+				ObservationID:  obsID,
+				Title:          leadData.Title,
+				ActionableStep: leadData.ActionableStep,
+				PoCs:           leadData.PoCs,
+				CreatedAt:      time.Now(),
+			})
+		}
+	}
+
+	return leads
 }
 
-// getRecentObservations gets the last N observations for context
-func (a *GenkitSecurityAnalyzer) getRecentObservations(n int) []models.Observation {
-	obsPointers := a.graph.GetRecentObservations(n)
+// getAllObservations gets recent observations with a configurable limit
+// CRITICAL FIX: Limit prevents token explosion after many requests
+// Default limit of 100 prevents ~150K token prompts after 1000+ requests
+func (a *GenkitSecurityAnalyzer) getAllObservations() []models.Observation {
+	const maxObservations = 100 // Configurable limit to prevent token explosion
+
+	// Get recent observations with limit
+	obsPointers := a.graph.GetRecentObservations(maxObservations)
 	observations := make([]models.Observation, len(obsPointers))
 	for i, obs := range obsPointers {
 		observations[i] = *obs
 	}
+
+	if len(obsPointers) >= maxObservations {
+		log.Printf("⚠️ Observation limit reached: using %d most recent observations", maxObservations)
+	}
+
 	return observations
 }
 

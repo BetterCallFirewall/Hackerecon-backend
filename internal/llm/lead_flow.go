@@ -25,6 +25,7 @@ type GetExchangeOutput struct {
 
 // getExchangeToolHandler retrieves exchanges from global InMemoryGraph
 // Uses global graph reference because Genkit ToolContext doesn't inherit parent context values
+// Returns truncated exchange to avoid sending large binary data to LLM
 func getExchangeToolHandler(toolCtx *ai.ToolContext, input GetExchangeInput) (GetExchangeOutput, error) {
 	// Get InMemoryGraph from global reference (set during analyzer initialization)
 	graph := models.GetGlobalInMemoryGraph()
@@ -39,8 +40,11 @@ func getExchangeToolHandler(toolCtx *ai.ToolContext, input GetExchangeInput) (Ge
 		return GetExchangeOutput{}, fmt.Errorf("get exchange failed: %w", err)
 	}
 
+	// Prepare exchange for LLM (truncate large bodies)
+	preparedExchange := PrepareExchangeForLLM(*exchange)
+
 	log.Printf("🔍 Tool getExchange success: exchangeID=%s, url=%s", input.ExchangeID, exchange.Request.URL)
-	return GetExchangeOutput{Exchange: *exchange}, nil
+	return GetExchangeOutput{Exchange: preparedExchange}, nil
 }
 
 var GetExchangeTool ai.ToolRef
@@ -51,7 +55,7 @@ func DefineGetExchangeTool(g *genkit.Genkit) {
 	GetExchangeTool = genkit.DefineTool(
 		g,
 		"getExchange",
-		"Retrieves full HTTP request/response details for a specific exchange ID. Use this when you need to see exact headers, body, or status codes to generate accurate PoCs.",
+		"Retrieves HTTP request/response details for a specific exchange ID. Large bodies (>10KB) are truncated for efficiency. Use this when you need to see headers, body content, or status codes to generate accurate PoCs.",
 		getExchangeToolHandler,
 	)
 	log.Printf("✅ getExchange tool registered successfully")

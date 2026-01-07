@@ -179,8 +179,8 @@ func (a *GenkitSecurityAnalyzer) RunDeepAnalysis(ctx context.Context) error {
 
 	// STEP 4: Store connections
 	for _, conn := range strategistResult.Connections {
-		a.graph.AddConnection(conn.ID1, conn.ID2, conn.Reason)
-		log.Printf("🔗 Connection: %s <-> %s", conn.ID1, conn.ID2)
+		a.graph.AddConnection(conn.From, conn.To, conn.Reason)
+		log.Printf("🔗 Connection: %s <-> %s", conn.From, conn.To)
 	}
 
 	// STEP 5: Update BigPicture
@@ -348,28 +348,14 @@ func (a *GenkitSecurityAnalyzer) GetWsHub() *websocket.WebsocketManager {
 }
 
 const (
-	maxBodySizeForLLM = 10_000    // 10KB limit for LLM analysis
-	maxResponseSize   = 1_000_000 // 1MB max response size
+	maxResponseSize = 1_000_000 // 1MB max response size
 )
 
 // prepareExchangeForLLM creates a copy of exchange with truncated bodies for LLM analysis
 // This prevents sending large binary data (images, videos, etc.) to the LLM
+// Delegates to llm.PrepareExchangeForLLM for consistency with tool handler
 func (a *GenkitSecurityAnalyzer) prepareExchangeForLLM(exchange models.HTTPExchange) models.HTTPExchange {
-	result := exchange
-
-	// Truncate request body if needed
-	if len(exchange.Request.Body) > maxBodySizeForLLM {
-		result.Request.Body = llm.TruncateBody(exchange.Request.Body, maxBodySizeForLLM)
-		log.Printf("⚠️ Truncated request body for LLM: %d → %d bytes", len(exchange.Request.Body), maxBodySizeForLLM)
-	}
-
-	// Truncate response body if needed
-	if len(exchange.Response.Body) > maxBodySizeForLLM {
-		result.Response.Body = llm.TruncateBody(exchange.Response.Body, maxBodySizeForLLM)
-		log.Printf("⚠️ Truncated response body for LLM: %d → %d bytes", len(exchange.Response.Body), maxBodySizeForLLM)
-	}
-
-	return result
+	return llm.PrepareExchangeForLLM(exchange)
 }
 
 // convertSiteMapEntries converts []*models.SiteMapEntry to []models.SiteMapEntry

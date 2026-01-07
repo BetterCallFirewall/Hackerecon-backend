@@ -92,6 +92,30 @@ func TruncateBody(body string, maxLen int) string {
 	return body[:maxLen] + fmt.Sprintf("\n\n... [TRUNCATED: %d bytes omitted]", omitted)
 }
 
+const (
+	// MaxBodySizeForLLM is the maximum body size for LLM analysis (10KB)
+	// This prevents sending large binary data (images, videos, etc.) to the LLM
+	MaxBodySizeForLLM = 10_000
+)
+
+// PrepareExchangeForLLM creates a copy of exchange with truncated bodies for LLM analysis
+// This prevents sending large binary data (images, videos, etc.) to the LLM
+func PrepareExchangeForLLM(exchange models.HTTPExchange) models.HTTPExchange {
+	result := exchange
+
+	// Truncate request body if needed
+	if len(exchange.Request.Body) > MaxBodySizeForLLM {
+		result.Request.Body = TruncateBody(exchange.Request.Body, MaxBodySizeForLLM)
+	}
+
+	// Truncate response body if needed
+	if len(exchange.Response.Body) > MaxBodySizeForLLM {
+		result.Response.Body = TruncateBody(exchange.Response.Body, MaxBodySizeForLLM)
+	}
+
+	return result
+}
+
 // FormatObservations formats observations as a numbered list
 // If includeHint is true, adds the Hint field when present
 func FormatObservations(obs []models.Observation, includeHint bool) string {
@@ -101,7 +125,14 @@ func FormatObservations(obs []models.Observation, includeHint bool) string {
 		if includeHint && o.Hint != "" {
 			hint = fmt.Sprintf("\n   Hint: %s", o.Hint)
 		}
-		result += fmt.Sprintf("%d. %s\n   Where: %s\n   Why:%s%s\n\n", i+1, o.What, o.Where, o.Why, hint)
+		// Format ExchangeIDs for display
+		exchangeIDs := ""
+		if len(o.ExchangeIDs) > 0 {
+			exchangeIDs = fmt.Sprintf("\n   Exchanges: %v", o.ExchangeIDs)
+		}
+		result += fmt.Sprintf(
+			"%d. %s\n   Where: %s\n   Why: %s%s%s\n\n", i+1, o.What, o.Where, o.Why, exchangeIDs, hint,
+		)
 	}
 	return result
 }
@@ -110,7 +141,7 @@ func FormatObservations(obs []models.Observation, includeHint bool) string {
 func FormatSiteMap(entries []models.SiteMapEntry) string {
 	result := ""
 	for _, e := range entries {
-		result += fmt.Sprintf("- %s %s\n", e.Method, e.URL)
+		result += fmt.Sprintf("- %s %s. ID - %s\n", e.Method, e.URL, e.ExchangeID)
 	}
 	return result
 }

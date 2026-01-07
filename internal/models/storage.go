@@ -197,10 +197,10 @@ func (g *InMemoryGraph) GetObservationsForLead(leadID string) []*Observation {
 	// Find all connections that involve this lead
 	var observationIDs []string
 	for _, conn := range g.connections {
-		if conn.ID1 == leadID {
-			observationIDs = append(observationIDs, conn.ID2)
-		} else if conn.ID2 == leadID {
-			observationIDs = append(observationIDs, conn.ID1)
+		if conn.From == leadID {
+			observationIDs = append(observationIDs, conn.To)
+		} else if conn.To == leadID {
+			observationIDs = append(observationIDs, conn.From)
 		}
 	}
 
@@ -252,14 +252,14 @@ func (g *InMemoryGraph) GetLead(id string) (*Lead, error) {
 }
 
 // AddConnection adds a connection between two entities
-func (g *InMemoryGraph) AddConnection(id1, id2, reason string) {
+func (g *InMemoryGraph) AddConnection(from, to, reason string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
 	g.connectionCount++
 	conn := &Connection{
-		ID1:       id1,
-		ID2:       id2,
+		From:      from,
+		To:        to,
 		Reason:    reason,
 		CreatedAt: time.Now(),
 	}
@@ -273,7 +273,7 @@ func (g *InMemoryGraph) GetConnectionsForEntity(entityID string) []*Connection {
 
 	connections := make([]*Connection, 0, len(g.connections))
 	for _, conn := range g.connections {
-		if conn.ID1 == entityID || conn.ID2 == entityID {
+		if conn.From == entityID || conn.To == entityID {
 			connections = append(connections, conn)
 		}
 	}

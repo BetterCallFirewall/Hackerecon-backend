@@ -1,9 +1,11 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/BetterCallFirewall/Hackerecon/internal/driven"
 )
@@ -52,9 +54,11 @@ func StartAPIServer(analyzer *driven.GenkitSecurityAnalyzer) {
 
 		log.Printf("📨 Received deep analysis request")
 
-		// Run deep analysis asynchronously (don't block HTTP response)
+		// Run deep analysis asynchronously with independent context (don't block HTTP response)
 		go func() {
-			if err := analyzer.RunDeepAnalysis(r.Context()); err != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			defer cancel()
+			if err := analyzer.RunDeepAnalysis(ctx); err != nil {
 				log.Printf("❌ Deep analysis failed: %v", err)
 			}
 		}()

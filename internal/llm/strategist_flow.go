@@ -14,9 +14,10 @@ import (
 
 // StrategistRequest - input for Strategist flow
 type StrategistRequest struct {
-	RawObservations []models.Observation  `json:"raw_observations"`
-	SiteMap         []models.SiteMapEntry `json:"site_map"`
-	BigPicture      *models.BigPicture    `json:"big_picture"`
+	RawObservations    []models.Observation       `json:"raw_observations"`
+	SiteMap            []models.SiteMapEntry      `json:"site_map"`
+	BigPicture         *models.BigPicture         `json:"big_picture"`
+	SystemArchitecture *models.SystemArchitecture `json:"system_architecture"` // NEW
 }
 
 // StrategistResult - output from Strategist flow
@@ -25,21 +26,13 @@ type StrategistResult struct {
 	Connections      []models.Connection      `json:"connections"`
 	BigPictureImpact *models.BigPictureImpact `json:"big_picture_impact,omitempty"`
 	TacticianTasks   []TacticianTask          `json:"tactician_tasks"`
-	TechnicalProfile *TechnicalProfile        `json:"technical_profile,omitempty"`
+	// REMOVED: TechnicalProfile - now in SystemArchitecture
 }
 
 // TacticianTask - task for Tactician agent
 type TacticianTask struct {
-	Observations []models.Observation `json:"observations"`
-	Description  string               `json:"description"`
-}
-
-// TechnicalProfile represents the analyzed tech stack
-type TechnicalProfile struct {
-	Database     string `json:"database,omitempty" jsonschema:"description=Detected database (e.g., MongoDB, PostgreSQL, MySQL)"`
-	Backend      string `json:"backend,omitempty" jsonschema:"description=Detected backend framework (e.g., Node/Express, Python/Django)"`
-	Architecture string `json:"architecture,omitempty" jsonschema:"description=API architecture (e.g., REST, GraphQL)"`
-	Notes        string `json:"notes,omitempty" jsonschema:"description=Additional observations about the tech stack"`
+	ObservationIDs []string `json:"observation_ids"` // List of observation IDs to reference
+	Description    string   `json:"description"`
 }
 
 // DefineStrategistFlow creates the Strategist Genkit flow

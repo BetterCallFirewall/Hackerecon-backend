@@ -14,11 +14,12 @@ import (
 	"github.com/firebase/genkit/go/genkit"
 )
 
-// GenkitSecurityAnalyzer implements the new 3-phase agent flow
-// Analyst → Strategist → Tactician
+// GenkitSecurityAnalyzer implements the new 4-phase agent flow
+// Analyst → Architect → Strategist → Tactician
 type GenkitSecurityAnalyzer struct {
 	// Individual agent flows (replaces detectiveAIFlow)
 	analystFlow    *genkitcore.Flow[*llm.AnalystRequest, *llm.AnalystResponse, struct{}]
+	architectFlow  *genkitcore.Flow[*llm.ArchitectRequest, *llm.ArchitectResult, struct{}]
 	strategistFlow *genkitcore.Flow[*llm.StrategistRequest, *llm.StrategistResult, struct{}]
 	tacticianFlow  *genkitcore.Flow[*llm.TacticianRequest, *llm.TacticianResult, struct{}]
 
@@ -29,7 +30,7 @@ type GenkitSecurityAnalyzer struct {
 	wsHub *websocket.WebsocketManager
 }
 
-// NewGenkitSecurityAnalyzer creates a new analyzer with the 3-phase agent flow
+// NewGenkitSecurityAnalyzer creates a new analyzer with the 4-phase agent flow
 func NewGenkitSecurityAnalyzer(
 	genkitApp *genkit.Genkit,
 	modelNameFast string,
@@ -41,6 +42,7 @@ func NewGenkitSecurityAnalyzer(
 
 	// Create agent flows with different models
 	analystFlow := llm.DefineAnalystFlow(genkitApp, modelNameFast)
+	architectFlow := llm.DefineArchitectFlow(genkitApp, modelNameSmart)
 	strategistFlow := llm.DefineStrategistFlow(genkitApp, modelNameSmart)
 	tacticianFlow := llm.DefineTacticianFlow(genkitApp, modelNameSmart)
 
@@ -51,6 +53,7 @@ func NewGenkitSecurityAnalyzer(
 
 	return &GenkitSecurityAnalyzer{
 		analystFlow:    analystFlow,
+		architectFlow:  architectFlow,
 		strategistFlow: strategistFlow,
 		tacticianFlow:  tacticianFlow,
 		graph:          graph,
@@ -120,6 +123,7 @@ func (a *GenkitSecurityAnalyzer) AnalyzeHTTPTraffic(
 
 	// STEP 6: Store raw observations
 	for i := range analystResult.Observations {
+		analystResult.Observations[i].ExchangeIDs = []string{exchangeID}
 		obsID := a.graph.AddRawObservation(&analystResult.Observations[i])
 		log.Printf("💡 Raw observation %s: %s", obsID, analystResult.Observations[i].What)
 	}
@@ -140,7 +144,7 @@ func (a *GenkitSecurityAnalyzer) AnalyzeHTTPTraffic(
 	return nil
 }
 
-// RunDeepAnalysis runs the Strategist and Tactician phases (Phases 2-3)
+// RunDeepAnalysis runs the Architect, Strategist and Tactician phases (Phases 2-4)
 // This is called separately (not per-request) to aggregate and analyze raw observations
 func (a *GenkitSecurityAnalyzer) RunDeepAnalysis(ctx context.Context) error {
 	log.Printf("🚀 Starting deep analysis")
@@ -153,13 +157,36 @@ func (a *GenkitSecurityAnalyzer) RunDeepAnalysis(ctx context.Context) error {
 	}
 	log.Printf("📊 Processing %d raw observations", len(rawBuffer))
 
-	// STEP 2: Strategist
+	// STEP 2: Architect (reconstruct system architecture and data flows)
 	siteMapEntries := a.graph.GetAllSiteMapEntries()
-	strategistResult, err := a.strategistFlow.Run(
-		ctx, &llm.StrategistRequest{
+	architectResult, err := a.architectFlow.Run(
+		ctx, &llm.ArchitectRequest{
 			RawObservations: rawBuffer,
 			SiteMap:         convertSiteMapEntries(siteMapEntries),
-			BigPicture:      a.graph.GetBigPicture(),
+		},
+	)
+	if err != nil {
+		// Restore raw buffer on failure
+		for i := range rawBuffer {
+			a.graph.AddRawObservation(&rawBuffer[i])
+		}
+		log.Printf("⚠️ Architect failed, restored %d raw observations to buffer", len(rawBuffer))
+		return fmt.Errorf("architect failed: %w", err)
+	}
+
+	log.Printf(
+		"🏗️  System Architecture: %s, %d data flows",
+		architectResult.SystemArchitecture.TechStack,
+		len(architectResult.SystemArchitecture.DataFlows),
+	)
+
+	// STEP 3: Strategist (with SystemArchitecture from Architect)
+	strategistResult, err := a.strategistFlow.Run(
+		ctx, &llm.StrategistRequest{
+			RawObservations:    rawBuffer,
+			SiteMap:            convertSiteMapEntries(siteMapEntries),
+			BigPicture:         a.graph.GetBigPicture(),
+			SystemArchitecture: &architectResult.SystemArchitecture,
 		},
 	)
 	if err != nil {
@@ -171,7 +198,7 @@ func (a *GenkitSecurityAnalyzer) RunDeepAnalysis(ctx context.Context) error {
 		return fmt.Errorf("strategist failed: %w", err)
 	}
 
-	// STEP 3: Store aggregated observations
+	// STEP 4: Store aggregated observations
 	for i := range strategistResult.Observations {
 		obsID := a.graph.AddObservation(&strategistResult.Observations[i])
 		log.Printf(
@@ -180,20 +207,20 @@ func (a *GenkitSecurityAnalyzer) RunDeepAnalysis(ctx context.Context) error {
 		)
 	}
 
-	// STEP 4: Store connections
+	// STEP 5: Store connections
 	for _, conn := range strategistResult.Connections {
 		a.graph.AddConnection(conn.From, conn.To, conn.Reason)
 		log.Printf("🔗 Connection: %s <-> %s", conn.From, conn.To)
 	}
 
-	// STEP 5: Update BigPicture
+	// STEP 6: Update BigPicture
 	if strategistResult.BigPictureImpact != nil {
 		if err := a.graph.UpdateBigPictureWithImpact(strategistResult.BigPictureImpact); err != nil {
 			log.Printf("⚠️ Failed to update BigPicture: %v", err)
 		}
 	}
 
-	// STEP 6: Tactician for each task
+	// STEP 7: Tactician for each task
 	allLeads := []models.Lead{}
 	for _, task := range strategistResult.TacticianTasks {
 		tacticianResult, err := a.tacticianFlow.Run(
@@ -201,7 +228,8 @@ func (a *GenkitSecurityAnalyzer) RunDeepAnalysis(ctx context.Context) error {
 				Task:       task,
 				BigPicture: a.graph.GetBigPicture(),
 				SiteMap:    convertSiteMapEntries(siteMapEntries),
-				Graph:      a.graph, // For getExchange tool
+				Graph:      a.graph,                             // For getExchange tool
+				SystemArch: &architectResult.SystemArchitecture, // For stack-specific context
 			},
 		)
 		if err != nil {
@@ -217,7 +245,7 @@ func (a *GenkitSecurityAnalyzer) RunDeepAnalysis(ctx context.Context) error {
 		}
 	}
 
-	// STEP 7: WebSocket with final results
+	// STEP 8: WebSocket with final results
 	a.wsHub.Broadcast(
 		websocket.DeepAnalysisDTO{
 			Observations: strategistResult.Observations,

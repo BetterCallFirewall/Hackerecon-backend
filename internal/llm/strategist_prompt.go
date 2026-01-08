@@ -2,6 +2,8 @@ package llm
 
 import (
 	"fmt"
+
+	"github.com/BetterCallFirewall/Hackerecon/internal/models"
 )
 
 // BuildStrategistPrompt creates prompt for Strategist agent
@@ -14,6 +16,9 @@ Raw Observations (%d):
 
 Big Picture:
 Description: %s
+
+=== SYSTEM ARCHITECTURE (from Architect) ===
+%s
 
 Site Map (%d endpoints):
 %s
@@ -46,17 +51,54 @@ STEP 1 - MERGE: Scan for duplicates
   - Collect ALL exchange_ids from merged observations
   - Example: obs-1 (JWT in /api/auth, exch-1) + obs-5 (JWT in /api/auth, exch-9) → single obs with [exch-1, exch-9]
 
-STEP 2 - ANALYZE: Build a Technical Profile
-  - Database: (e.g., MySQL, MongoDB, PostgreSQL). Look for ID formats (UUID vs ObjectID), error messages.
-  - Backend: (e.g., Python/Django, Node/Express, PHP). Look for headers, cookie names.
-  - Architecture: REST, GraphQL, etc.
+STEP 2 - THREAT MODELING (USE SYSTEM ARCHITECTURE ABOVE):
 
-STEP 3 - MAP ATTACK VECTORS (TECH STACK SPECIFIC):
-  - If MongoDB + URL IDs detected -> CHECK FOR NoSQL INJECTION IN URL.
-    Rule: Express.js often parses JSON in URL params automatically.
-    Vector: Replace ID with JSON: /api/item/123 -> /api/item/{"$ne":null}
-  - If Python/Flask + Reflected Input -> CHECK FOR SSTI.
-  - If JWT -> CHECK FOR 'NONE' ALG or WEAK SECRET.
+You receive SystemArchitecture from the Architect (shown in "=== SYSTEM ARCHITECTURE ===" section above).
+USE IT for stack-specific threat modeling based on the TechStack and DataFlows provided.
+
+STACK-SPECIFIC ATTACK VECTORS:
+
+IF TechStack mentions "MongoDB":
+  • NoSQLi in URL params: /api/item/507f1f... → /api/item/{"$ne":null}
+  • NoSQLi in JSON body: {"user":{"$ne":null}, "pass":{"$ne":null}}
+  • Regex extraction: {"password":{"$regex":".*"}}
+  • Operator injection: {"$gt":""}, {"$in":[...]}
+
+IF TechStack mentions "PostgreSQL" OR "MySQL":
+  • SQLi in string params: ' OR '1'='1
+  • UNION-based extraction: ' UNION SELECT username,password FROM users--
+  • Boolean-based: ' AND 1=1 (true) vs ' AND 1=2 (false)
+
+IF TechStack mentions "Python" OR "Jinja2":
+  • SSTI: {{7*7}} → {{config.items()}}
+  • Template injection: {{''.__class__.__mro__[1].__subclasses__()[40]('/etc/passwd').read()}}
+
+IF TechStack mentions "JWT":
+  • alg=none attack: Remove signature, change payload
+  • Weak secret: Brute force with jwt-cracker
+  • Key confusion: RSA → HMAC
+
+DATA FLOW ATTACK SURFACE:
+
+For each DataFlow chain:
+- Analyze the ROUTE CHAIN for injection points
+- Look for: URL parameters, JSON bodies, query strings
+- Cross-reference with InferredLogic to find vulnerabilities
+
+EXAMPLE:
+If DataFlow is "POST /api/upload --> GET /api/files/:id"
+And Logic says "retrieval by ID"
+And TechStack says "MongoDB"
+→ TASK: Test NoSQLi in GET /api/files/{'$ne':null}
+
+STEP 3 - CREATE TACTICIAN TASKS (FROM THREAT MODELING):
+
+For each high-risk combination identified in STEP 2:
+- Map: DataFlow + TechStack + Attack Vector → Focused Tactician task
+- Example: "MongoDB" + "POST /api/upload --> GET /api/files/:id" + "NoSQLi in URL"
+  → Task: "Test NoSQLi in file retrieval endpoint with payload {\"$ne\":null}"
+- Include specific payload hints from threat modeling section
+- Each task should have 2-5 related observations and a clear description
 
 STEP 4 - CONNECT: Find EXPLOITABLE relationships (THIS IS CRITICAL)
   Good exploitable connections:
@@ -126,21 +168,33 @@ Return JSON:
   },
   "tactician_tasks": [
     {
-      "observations": [/* observation objects */],
+      "observation_ids": ["obs-1", "obs-3", "obs-5"],  // IDs of observations for this task
       "description": "Authentication bypass chain: JWT + public key + no alg verification"
     }
-  ],
-  "technical_profile": {
-    "database": "detected from error messages and ID formats",
-    "backend": "inferred from headers and cookie names",
-    "architecture": "REST or GraphQL",
-    "notes": "specific patterns relevant to exploitation"
-  }
+  ]
 }`,
 		len(req.RawObservations),
 		FormatObservations(req.RawObservations, false),
 		req.BigPicture.Description,
+		formatSystemArchitecture(req.SystemArchitecture),
 		len(req.SiteMap),
 		FormatSiteMap(req.SiteMap),
 	)
+}
+
+// formatSystemArchitecture formats SystemArchitecture for prompt display
+func formatSystemArchitecture(sa *models.SystemArchitecture) string {
+	if sa == nil {
+		return "  (not available)\n"
+	}
+
+	result := "Tech Stack:\n"
+	result += fmt.Sprintf("  %s\n", sa.TechStack)
+
+	result += "\nData Flows:\n"
+	for i, df := range sa.DataFlows {
+		result += fmt.Sprintf("  %d. Route: %s\n", i+1, df.Route)
+		result += fmt.Sprintf("     Logic: %s\n", df.InferredLogic)
+	}
+	return result
 }

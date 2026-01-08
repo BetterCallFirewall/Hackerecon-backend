@@ -86,6 +86,20 @@ type BigPictureImpact struct {
 	Reason string `json:"reason,omitempty" jsonschema:"description=Why this update is needed"`
 }
 
+// SystemArchitecture represents the reconstructed system architecture
+// Built by Architect agent from raw observations and site map
+type SystemArchitecture struct {
+	TechStack string     `json:"tech_stack" jsonschema:"description=Detected technology stack (e.g., 'MongoDB, Node.js/Express, Auth via JWT')"`
+	DataFlows []DataFlow `json:"data_flows" jsonschema:"description=Data flow chains showing how data moves through routes"`
+}
+
+// DataFlow represents how data flows through a chain of routes
+// Key insight: Data has sources (upload forms), transformations (DB operations), and sinks (downloads)
+type DataFlow struct {
+	Route         string `json:"route" jsonschema:"description=Route chain (e.g., 'POST /api/shop/ --> GET /api/shop/:id --> DELETE /api/shop/:id')"`
+	InferredLogic string `json:"inferred_logic" jsonschema:"description=Inferred backend logic (e.g., 'User uploads picture -> Picture saved to DB -> User can retrieve picture via id in URL')"`
+}
+
 // SiteMapEntry represents an entry in the site map (Burp-style)
 type SiteMapEntry struct {
 	ID         string       `json:"id" jsonschema:"description=Unique site map entry ID"`

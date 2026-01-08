@@ -2,27 +2,32 @@ package llm
 
 import (
 	"fmt"
+
+	"github.com/BetterCallFirewall/Hackerecon/internal/models"
 )
 
-func formatTechnicalProfile(tp *TechnicalProfile) string {
-	if tp == nil {
-		return "  (not available)"
+// getObservationsFromGraph retrieves observations from the InMemoryGraph by their IDs
+func getObservationsFromGraph(observationIDs []string, graph *models.InMemoryGraph) []models.Observation {
+	if len(observationIDs) == 0 {
+		return []models.Observation{}
 	}
-	result := "  Database: " + tp.Database
-	if tp.Backend != "" {
-		result += "\n  Backend: " + tp.Backend
+
+	observations := make([]models.Observation, 0, len(observationIDs))
+	for _, id := range observationIDs {
+		obs, err := graph.GetObservation(id)
+		if err == nil {
+			observations = append(observations, *obs)
+		}
+		// Skip observations that are not found (may have been pruned)
 	}
-	if tp.Architecture != "" {
-		result += "\n  Architecture: " + tp.Architecture
-	}
-	if tp.Notes != "" {
-		result += "\n  Notes: " + tp.Notes
-	}
-	return result
+	return observations
 }
 
 // BuildTacticianPrompt creates prompt for Tactician agent
 func BuildTacticianPrompt(req *TacticianRequest) string {
+	// Get observations from Graph by their IDs
+	observations := getObservationsFromGraph(req.Task.ObservationIDs, req.Graph)
+
 	return fmt.Sprintf(
 		`You are a Tactician (Pentester). Your job is to verify observations and generate WORKING, multi-step exploitation chains with PoCs.
 
@@ -39,16 +44,38 @@ Description: %s
 Site Map (%d endpoints):
 %s
 
-Technical Profile: %s
+System Architecture:
+%s
 
 Available tools:
 - getExchange(id): Get full HTTP exchange details (use this to inspect actual requests/responses before building PoCs)
 
+== ⚠️⚠️⚠️ CRITICAL TOOL LIMIT ⚠️⚠️⚠️ ==
+
+You have MAXIMUM 5 getExchange calls TOTAL for this entire task.
+Each call consumes 1/5 of your budget.
+You CANNOT iterate through SiteMap.
+You MUST choose TOP 3-5 most relevant endpoints based on your task and STOP.
+
+Tool usage budget: [ ] [ ] [ ] [ ] [ ] (5 calls max)
+
+CONSEQUENCES:
+- Exceeding 5 calls will FAIL your analysis
+- Wasting calls on irrelevant endpoints means you won't have enough for the important ones
+- Think FIRST, then use tools strategically
+
+STRATEGY:
+1. Read your task carefully
+2. Scan observations for SPECIFIC endpoints mentioned
+3. Select ONLY endpoints directly related to the vulnerability you're exploiting
+4. Use getExchange on those 3-5 endpoints
+5. STOP using tools and build your PoCs
+
 == RULES FOR TOOLS ==
 
-1. DO NOT iterate through the entire Site Map with getExchange.
-2. Only use getExchange on up to 5 MOST SUSPICIOUS endpoints relevant to your specific task.
-3. If Technical Profile indicates specific tech stack, use that knowledge to target your testing (e.g., specific database types, frameworks).
+1. DO NOT write ANY output, analysis, or commentary before using tools.
+2. DO NOT iterate through the entire Site Map with getExchange.
+3. Only use getExchange on up to 5 MOST SUSPICIOUS endpoints relevant to your specific task.
 
 == REASONING PROCESS (THINK STEP BY STEP) ==
 
@@ -60,8 +87,9 @@ STEP 1: UNDERSTAND
 - What is the ultimate goal (data exfiltration, privilege escalation, RCE)?
 
 STEP 2: VERIFY
-- Use getExchange() to inspect actual HTTP traffic
-- Use Technical Profile to guide verification based on detected tech stack
+- REMEMBER: You have ONLY 5 getExchange calls - use them WISELY
+- Scan observations for specific endpoints related to your task
+- Use getExchange() ONLY on those 3-5 most relevant endpoints
 - Check response headers, status codes, body structure
 - Identify the exact vulnerable parameter or endpoint
 - Confirm the vulnerability really exists (don't guess)
@@ -242,10 +270,27 @@ Return JSON with complete exploitation chains:
 - Focus on CTF-style exploits: JWT, IDOR, GraphQL, race conditions, SSTI, XXE
 - If observation is general advice ("check for CVE-2024-1234"), create a lead with concrete reproduction steps`,
 		req.Task.Description,
-		FormatObservations(req.Task.Observations, true),
+		FormatObservations(observations, true),
 		req.BigPicture.Description,
 		len(req.SiteMap),
 		FormatSiteMap(req.SiteMap),
-		formatTechnicalProfile(req.TechnicalProfile),
+		formatSystemArchitectureForTactician(req.SystemArch),
 	)
+}
+
+// formatSystemArchitectureForTactician formats SystemArchitecture for Tactician prompt display
+func formatSystemArchitectureForTactician(sa *models.SystemArchitecture) string {
+	if sa == nil {
+		return "  (not available)\n"
+	}
+
+	result := "Tech Stack:\n"
+	result += fmt.Sprintf("  %s\n", sa.TechStack)
+
+	result += "\nData Flows:\n"
+	for i, df := range sa.DataFlows {
+		result += fmt.Sprintf("  %d. Route: %s\n", i+1, df.Route)
+		result += fmt.Sprintf("     Logic: %s\n", df.InferredLogic)
+	}
+	return result
 }

@@ -13,11 +13,11 @@ import (
 
 // TacticianRequest - input for Tactician flow
 type TacticianRequest struct {
-	Task             TacticianTask         `json:"task"`
-	BigPicture       *models.BigPicture    `json:"big_picture"`
-	SiteMap          []models.SiteMapEntry `json:"site_map"`
-	TechnicalProfile *TechnicalProfile     `json:"technical_profile,omitempty"`
-	Graph            *models.InMemoryGraph `json:"-"` // For tool access
+	Task       TacticianTask              `json:"task"`
+	BigPicture *models.BigPicture         `json:"big_picture"`
+	SiteMap    []models.SiteMapEntry      `json:"site_map"`
+	Graph      *models.InMemoryGraph      `json:"-"`                             // For tool access
+	SystemArch *models.SystemArchitecture `json:"system_architecture,omitempty"` // From Architect
 }
 
 // TacticianResult - output from Tactician flow

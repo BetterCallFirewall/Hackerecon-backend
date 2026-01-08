@@ -50,6 +50,30 @@ HIGH PRIORITY - Logical Vulnerabilities:
 9. Injection in URL Path: URL segments that look like IDs (UUID, Mongo ObjectID) or JSON keys.
    CRITICAL: If backend is likely NodeJS/MongoDB, URL params might be passed directly to DB queries.
 
+=== DATA FLOW PATTERNS (HELPFUL FOR ARCHITECT) ===
+
+Technical Signs (helps identify tech stack and data flows):
+1. ID Formats in URL/Response:
+   - /api/shop/507f1f77bcf86cd799439011 → 24-char hex = MongoDB ObjectID
+   - /api/shop/550e8400-e29b-41d4-a716-446655440000 → 36-char UUID
+   - /api/users/123 → Integer ID = SQL auto-increment
+   OBSERVE: Exact format, position in URL, parameter name
+
+2. Response Structure:
+   - {"_id": "..."} → MongoDB
+   - {"id": 123} → SQL
+   - {"file_id": "abc", "url": "/files/abc"} → Shows data flow
+
+3. Request Body Structure:
+   - JSON arrays → {"users": [...]} → Bulk operations
+   - Nested objects → {"user": {"profile": {...}}} → Complex schema
+   - File uploads → multipart/form-data → File handling
+
+4. Parameter Names (reveal functionality):
+   - user_id, profile_id, order_id → Resource identifiers
+   - file_id, upload_id → File operations
+   - redirect_url, next → Open redirect potential
+
 MEDIUM PRIORITY - Classic Vulns:
 1. SQLi: ', ", 1' OR '1'='1, union select
 2. XSS: <script>, <img, javascript: in reflected params
@@ -104,9 +128,9 @@ GOOD OBSERVATIONS (exploitable):
   "why": "Base64 decodes to PHP serialized object - potential object injection"
 }
 {
-  "what": "Potential NoSQL Injection point in URL path",
-  "where": "URL: /api/shop/7053d98c...",
-  "why": "Path segment is a MongoDB ObjectID. In Express/Mongo apps, this allows payload injection like /api/shop/{'$ne':null}"
+  "what": "MongoDB ObjectID format in URL parameter",
+  "where": "URL: /api/shop/507f1f77bcf86cd799439011",
+  "why": "24-char hex string indicates MongoDB backend - critical for NoSQLi testing"
 }
 
 BAD OBSERVATIONS (should be ignored):

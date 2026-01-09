@@ -91,14 +91,46 @@ And Logic says "retrieval by ID"
 And TechStack says "MongoDB"
 → TASK: Test NoSQLi in GET /api/files/{'$ne':null}
 
-STEP 3 - CREATE TACTICIAN TASKS (FROM THREAT MODELING):
+STEP 3 - PER DATAFLOW ANALYSIS:
 
-For each high-risk combination identified in STEP 2:
-- Map: DataFlow + TechStack + Attack Vector → Focused Tactician task
-- Example: "MongoDB" + "POST /api/upload --> GET /api/files/:id" + "NoSQLi in URL"
-  → Task: "Test NoSQLi in file retrieval endpoint with payload {\"$ne\":null}"
-- Include specific payload hints from threat modeling section
-- Each task should have 2-5 related observations and a clear description
+FOR EACH DataFlow in SystemArchitecture.DataFlows:
+1. Analyze THIS chain:
+   - Input points: Where does user-controlled data enter?
+   - Transformations: How is it processed/sanitized?
+   - Sink points: Where does it end up (DB query, file system, response)?
+
+2. Apply stack-specific attack vectors:
+   IF TechStack contains "MongoDB" AND DataFlow has ID in URL
+   → Create task for NoSQLi in that specific endpoint
+
+   IF TechStack contains "PostgreSQL"/"MySQL" AND DataFlow has ID in URL
+   → Create task for SQLi in that specific endpoint
+
+   IF TechStack contains "Jinja2"/"Python" AND DataFlow has user input
+   → Create task for SSTI via template injection
+
+   IF TechStack contains "React"/"Vue"/"JavaScript"/"Angular" AND DataFlow has user input in HTML context
+   → Create task for XSS via reflected or stored injection
+
+   IF TechStack contains "requests"/"httpx"/"fetch"/"axios" AND DataFlow has URL parameter
+   → Create task for SSRF via internal endpoint access (metadata APIs, internal IPs)
+
+For other technologies in the stack, apply standard OWASP Top 10 vectors:
+- IDOR (insecure direct object reference) - sequential IDs, user-controlled identifiers
+- XXE (XML external entity) - XML parsing libraries
+- Insecure deserialization - pickle, JSON, YAML libraries
+- Command injection - shell execution, os.system, subprocess
+- File inclusion - local/remote file inclusion via path traversal
+
+3. Output ONE TacticianTask per vulnerable DataFlow with:
+   - dataflow: The specific chain route (e.g., "POST /api/shop/ --> GET /api/shop/:id")
+   - observation_ids: Only observations related to THIS chain
+   - description: Specific to this chain's vulnerability
+
+IMPORTANT:
+- One task per DataFlow (if vulnerable)
+- Not one task per vulnerability type
+- Skip DataFlows that have no exploitable vulnerabilities
 
 STEP 4 - CONNECT: Find EXPLOITABLE relationships (THIS IS CRITICAL)
   Good exploitable connections:
@@ -168,8 +200,9 @@ Return JSON:
   },
   "tactician_tasks": [
     {
-      "observation_ids": ["obs-1", "obs-3", "obs-5"],  // IDs of observations for this task
-      "description": "Authentication bypass chain: JWT + public key + no alg verification"
+      "dataflow": "POST /api/shop/ --> GET /api/shop/:id",  // The specific route chain being analyzed
+      "observation_ids": ["obs-1", "obs-3", "obs-5"],  // IDs of observations for this task (only related to THIS chain)
+      "description": "NoSQLi in GET /api/shop/:id via MongoDB ObjectID injection with payload {\"$ne\":null}"
     }
   ]
 }`,

@@ -24,6 +24,14 @@ Raw Observations (%d):
 
 You must deduce the TECHNOLOGY STACK and map DATA FLOW CHAINS by connecting observations.
 
+**IMPORTANT**: RawObservations come from security-focused Analyst, but contain VALUABLE metadata:
+- ID formats detected (MongoDB ObjectID, UUID, integer)
+- Response field names ("file_id", "user_id", etc.)
+- Request/response patterns
+- Parameter names and structures
+
+EXTRACT THIS INFO from observations even if they mention security - the data is still valid for architecture!
+
 STEP 1 - IDENTIFY TECH STACK:
 
 Look for these PATTERNS in observations:
@@ -54,30 +62,33 @@ STEP 2 - MAP DATA FLOW CHAINS:
 
 **CRITICAL**: Your main job is to find CHAINS of routes that show how data flows.
 
+**USE OBSERVATIONS + SITE MAP TOGETHER**:
+- Observations tell you WHAT was detected (ID formats, field names, patterns)
+- SiteMap tells you WHICH routes exist (with ExchangeID for reference)
+- Cross-reference: If obs mentions "MongoDB ObjectID in /api/files/XXX", find matching route in SiteMap
+
 HOW TO FIND CHAINS:
 Look for CONNECTIONS between routes:
 
 1. **By ID flow**:
-   - Response from POST /api/upload returns: {"id": "507f1f..."}
-   - Next request: GET /api/files/507f1f...
+   - Observation: "POST /api/upload returns MongoDB ObjectID (file_id)"
+   - SiteMap: GET /api/files/:id exists
+   - Connection: POST creates ID → GET uses same ID
    - Chain: POST /api/upload/ --> GET /api/files/:id
 
 2. **By resource pattern**:
-   - POST /api/users (create)
-   - GET /api/users/:id (read)
-   - PUT /api/users/:id (update)
-   - DELETE /api/users/:id (delete)
+   - SiteMap: POST /api/users, GET /api/users/:id, PUT /api/users/:id, DELETE /api/users/:id
+   - Observation: "Integer IDs in user endpoints"
    - Chain: POST /api/users/ --> GET /api/users/:id --> PUT /api/users/:id --> DELETE /api/users/:id
 
 3. **By session/token**:
-   - POST /api/login returns token
-   - GET /api/profile uses token
-   - POST /api/upload uses token
-   - Chain: POST /api/login --> GET /api/profile & POST /api/upload
+   - Observation: "JWT token returned from /api/login"
+   - Observation: "JWT used in Authorization header for /api/profile"
+   - Chain: POST /api/login --> GET /api/profile
 
 4. **By parameter names**:
-   - Response has: {"file_id": "abc"}
-   - Next request uses file_id
+   - Observation: "Response has file_id field (MongoDB ObjectID)"
+   - Observation: "Next request uses file_id in query parameter"
    - Chain shows data lineage
 
 FOR EACH CHAIN:

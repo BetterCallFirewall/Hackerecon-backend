@@ -33,6 +33,7 @@ type StrategistResult struct {
 type TacticianTask struct {
 	ObservationIDs []string `json:"observation_ids"` // List of observation IDs to reference
 	Description    string   `json:"description"`
+	DataFlow       string   `json:"dataflow,omitempty"` // NEW: Which chain this targets
 }
 
 // DefineStrategistFlow creates the Strategist Genkit flow

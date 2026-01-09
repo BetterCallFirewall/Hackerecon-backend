@@ -297,8 +297,9 @@ func (a *GenkitSecurityAnalyzer) shouldSkipRequest(method, url string, statusCod
 
 // isStaticAsset checks if URL is a static asset
 func isStaticAsset(url string) bool {
+	// Note: .css is EXCLUDED - CSS files can contain sensitive paths/comments
 	staticExtensions := []string{
-		".css", ".js", ".png", ".jpg", ".jpeg", ".gif", ".ico", ".svg", ".woff", ".woff2", ".ttf", ".eot",
+		".js", ".png", ".jpg", ".jpeg", ".gif", ".ico", ".svg", ".woff", ".woff2", ".ttf", ".eot",
 	}
 	for _, ext := range staticExtensions {
 		if strings.Contains(strings.ToLower(url), ext) {

@@ -91,9 +91,8 @@ LOW PRIORITY (only if unique/unusual):
 2. Standard headers: Server, Date, Content-Type, Cache-Control
 3. Old library versions: jQuery 1.12, Bootstrap 3.3, etc.
 4. Missing security headers: no X-Frame-Options, no CSP
-5. Cookies without HttpOnly/Secure flags (unless session-related)
-6. Robots.txt, sitemap.xml (unless sensitive paths exposed)
-7. Generic error messages: 404, 500, "internal server error"
+5. Generic error messages: 404, 500, "internal server error"
+6. Protocol: HTTP vs HTTPS - not relevant for analysis
 
 === EXAMPLES ===
 

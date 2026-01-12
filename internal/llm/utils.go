@@ -523,8 +523,8 @@ func FormatObservations(obs []models.Observation, includeHint bool) string {
 	result := ""
 	for i, o := range obs {
 		hint := ""
-		if includeHint && o.Hint != "" {
-			hint = fmt.Sprintf("\n   Hint: %s", o.Hint)
+		if includeHint && o.Hint != nil {
+			hint = fmt.Sprintf("\n   Hint: %s", *o.Hint)
 		}
 		// Format ExchangeIDs for display
 		exchangeIDs := ""

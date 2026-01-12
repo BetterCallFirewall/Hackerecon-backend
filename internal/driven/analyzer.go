@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/BetterCallFirewall/Hackerecon/internal/llm"
@@ -12,6 +13,7 @@ import (
 	"github.com/BetterCallFirewall/Hackerecon/internal/websocket"
 	genkitcore "github.com/firebase/genkit/go/core"
 	"github.com/firebase/genkit/go/genkit"
+	"golang.org/x/sync/errgroup"
 )
 
 // GenkitSecurityAnalyzer implements the new 4-phase agent flow
@@ -143,12 +145,12 @@ func (a *GenkitSecurityAnalyzer) AnalyzeHTTPTraffic(
 	// STEP 7: WebSocket with FULL exchange (not truncated)
 	a.wsHub.Broadcast(
 		websocket.AnalystDTO{
-			ExchangeID:   exchangeID,
-			Method:       method,
-			URL:          url,
-			StatusCode:   statusCode,
-			Exchange:     exchange, // FULL exchange, not exchangeForLLM
-			Observations: analystResult.Observations,
+			ExchangeID:    exchangeID,
+			Method:        method,
+			URL:           url,
+			StatusCode:    statusCode,
+			Exchange:      exchange, // FULL exchange, not exchangeForLLM
+			Observations:  analystResult.Observations,
 			TrafficDigest: analystResult.TrafficDigest,
 		},
 	)
@@ -233,29 +235,61 @@ func (a *GenkitSecurityAnalyzer) RunDeepAnalysis(ctx context.Context) error {
 		}
 	}
 
-	// STEP 7: Tactician for each task
+	// STEP 7: Tactician for each task (parallel execution with errgroup)
 	allLeads := []models.Lead{}
-	for _, task := range strategistResult.TacticianTasks {
-		tacticianResult, err := a.tacticianFlow.Run(
-			ctx, &llm.TacticianRequest{
-				Task:       task,
-				BigPicture: a.graph.GetBigPicture(),
-				SiteMap:    convertSiteMapEntries(siteMapEntries),
-				Graph:      a.graph,                             // For getExchange tool
-				SystemArch: &architectResult.SystemArchitecture, // For stack-specific context
-			},
-		)
-		if err != nil {
-			log.Printf("⚠️ Tactician failed for task %s: %v", task.Description, err)
-			continue // Continue with next task
+	leadsMu := sync.Mutex{} // For safe appends to allLeads slice
+
+	if len(strategistResult.TacticianTasks) > 0 {
+		log.Printf("🔧 Starting %d tactician tasks in parallel", len(strategistResult.TacticianTasks))
+
+		g, gCtx := errgroup.WithContext(ctx)
+
+		for taskIdx, task := range strategistResult.TacticianTasks {
+			// Capture loop variables for goroutine
+			taskIdx, task := taskIdx, task
+
+			g.Go(func() error {
+				log.Printf("🟡 [Task %d/%d] Tactician analyzing: %s",
+					taskIdx+1, len(strategistResult.TacticianTasks), task.Description)
+
+				tacticianResult, err := a.tacticianFlow.Run(
+					gCtx, &llm.TacticianRequest{
+						Task:       task,
+						BigPicture: a.graph.GetBigPicture(),
+						SiteMap:    convertSiteMapEntries(siteMapEntries),
+						Graph:      a.graph,                             // For getExchange tool
+						SystemArch: &architectResult.SystemArchitecture, // For stack-specific context
+					},
+				)
+				if err != nil {
+					log.Printf("⚠️ [Task %d/%d] Tactician failed: %v",
+						taskIdx+1, len(strategistResult.TacticianTasks), err)
+					// Don't fail entire group - return nil to continue with other tasks
+					return nil
+				}
+
+				// Store leads with mutex protection for allLeads slice
+				leadsMu.Lock()
+				for _, lead := range tacticianResult.Leads {
+					leadID := a.graph.AddLead(&lead)
+					log.Printf("🎯 [Task %d/%d] Lead %s: %s",
+						taskIdx+1, len(strategistResult.TacticianTasks), leadID, lead.Title)
+					allLeads = append(allLeads, lead)
+				}
+				leadsMu.Unlock()
+
+				log.Printf("✅ [Task %d/%d] Complete: %d leads",
+					taskIdx+1, len(strategistResult.TacticianTasks), len(tacticianResult.Leads))
+				return nil
+			})
 		}
 
-		// Store leads
-		for _, lead := range tacticianResult.Leads {
-			leadID := a.graph.AddLead(&lead)
-			log.Printf("🎯 Lead %s: %s", leadID, lead.Title)
-			allLeads = append(allLeads, lead)
+		// Wait for all tasks to complete
+		if err := g.Wait(); err != nil {
+			log.Printf("⚠️ Tactician group completed with error: %v", err)
 		}
+
+		log.Printf("✅ All tactician tasks complete: %d leads generated", len(allLeads))
 	}
 
 	// STEP 8: WebSocket with final results

@@ -295,10 +295,13 @@ func (a *GenkitSecurityAnalyzer) RunDeepAnalysis(ctx context.Context) error {
 	// STEP 8: WebSocket with final results
 	a.wsHub.Broadcast(
 		websocket.DeepAnalysisDTO{
-			Observations: strategistResult.Observations,
-			Connections:  strategistResult.Connections,
-			Leads:        allLeads,
-			BigPicture:   a.graph.GetBigPicture(),
+			Observations:       strategistResult.Observations,
+			Connections:        strategistResult.Connections,
+			Leads:              allLeads,
+			BigPicture:         a.graph.GetBigPicture(),
+			SystemArchitecture: &architectResult.SystemArchitecture,
+			TacticianTasks:     strategistResult.TacticianTasks,
+			SiteMap:            convertSiteMapEntries(siteMapEntries),
 		},
 	)
 

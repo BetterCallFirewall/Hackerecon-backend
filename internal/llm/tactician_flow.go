@@ -13,7 +13,7 @@ import (
 
 // TacticianRequest - input for Tactician flow
 type TacticianRequest struct {
-	Task       TacticianTask              `json:"task"`
+	Task       models.TacticianTask       `json:"task"`
 	BigPicture *models.BigPicture         `json:"big_picture"`
 	SiteMap    []models.SiteMapEntry      `json:"site_map"`
 	Graph      *models.InMemoryGraph      `json:"-"`                             // For tool access

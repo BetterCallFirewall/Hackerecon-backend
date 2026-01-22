@@ -25,15 +25,8 @@ type StrategistResult struct {
 	Observations     []models.Observation     `json:"observations"`
 	Connections      []models.Connection      `json:"connections"`
 	BigPictureImpact *models.BigPictureImpact `json:"big_picture_impact,omitempty"`
-	TacticianTasks   []TacticianTask          `json:"tactician_tasks"`
+	TacticianTasks   []models.TacticianTask   `json:"tactician_tasks"`
 	// REMOVED: TechnicalProfile - now in SystemArchitecture
-}
-
-// TacticianTask - task for Tactician agent
-type TacticianTask struct {
-	ObservationIDs []string `json:"observation_ids"` // List of observation IDs to reference
-	Description    string   `json:"description"`
-	DataFlow       string   `json:"dataflow,omitempty"` // NEW: Which chain this targets
 }
 
 // DefineStrategistFlow creates the Strategist Genkit flow

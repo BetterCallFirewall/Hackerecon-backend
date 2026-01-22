@@ -19,19 +19,22 @@ type DetectiveDTO struct {
 
 // AnalystDTO - real-time result from Analyst
 type AnalystDTO struct {
-	ExchangeID   string               `json:"exchange_id"`
-	Method       string               `json:"method"`
-	URL          string               `json:"url"`
-	StatusCode   int                  `json:"status_code"`
-	Exchange     models.HTTPExchange  `json:"exchange"`       // FULL exchange
-	Observations []models.Observation `json:"observations"`   // Raw observations
+	ExchangeID    string                `json:"exchange_id"`
+	Method        string                `json:"method"`
+	URL           string                `json:"url"`
+	StatusCode    int                   `json:"status_code"`
+	Exchange      models.HTTPExchange   `json:"exchange"`                 // FULL exchange
+	Observations  []models.Observation  `json:"observations"`             // Raw observations
 	TrafficDigest *models.TrafficDigest `json:"traffic_digest,omitempty"` // Architectural summary
 }
 
-// DeepAnalysisDTO - result from Strategist + Tactician
+// DeepAnalysisDTO - result from Strategist + Tactician + Architect
 type DeepAnalysisDTO struct {
-	Observations []models.Observation `json:"observations"`
-	Connections  []models.Connection  `json:"connections"`
-	Leads        []models.Lead        `json:"leads"`
-	BigPicture   *models.BigPicture   `json:"big_picture"`
+	Observations       []models.Observation       `json:"observations"`
+	Connections        []models.Connection        `json:"connections"`
+	Leads              []models.Lead              `json:"leads"`
+	BigPicture         *models.BigPicture         `json:"big_picture"`
+	SystemArchitecture *models.SystemArchitecture `json:"system_architecture"`
+	TacticianTasks     []models.TacticianTask     `json:"tactician_tasks"`
+	SiteMap            []models.SiteMapEntry      `json:"site_map"`
 }
